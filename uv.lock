@@ -638,6 +638,11 @@ dependencies = [
     { name = "shapely" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "ipykernel" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "cartopy", specifier = ">=0.24.1" },
@@ -651,6 +656,9 @@ requires-dist = [
     { name = "pyshp", specifier = ">=2.3.1" },
     { name = "shapely", specifier = ">=2.0.7" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "ipykernel", specifier = ">=6.29.5" }]
 
 [[package]]
 name = "h11"
