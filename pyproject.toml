@@ -9,7 +9,7 @@ dependencies = [
     "highspy>=1.9.0",
     "jupyter>=1.1.1",
     "matplotlib>=3.10.0",
-    "numpy>=2.2.2",
+    "numpy<2.0",
     "pandas>=2.2.3",
     "pypsa>=0.28.0",
     "pyscipopt>=5.3.0",
