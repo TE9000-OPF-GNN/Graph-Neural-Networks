@@ -1,3 +1,6 @@
 .venv/
 
 Simple_GNN_Powerflow_old.ipynb
+test_results/
+training_results_saved/
+physics_comparison_results/
