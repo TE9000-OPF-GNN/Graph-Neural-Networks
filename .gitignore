@@ -3,6 +3,7 @@
 Simple_GNN_Powerflow_old.ipynb
 test_results/
 training_results_saved/
+training_networks_saved/
 physics_comparison_results/
 grid_model_files/
 code_base.py

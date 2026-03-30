@@ -3,7 +3,7 @@ name = "graph-neural-networks"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11, <3.12"
 dependencies = [
     "cartopy>=0.24.1",
     "highspy>=1.9.0",
@@ -11,12 +11,13 @@ dependencies = [
     "matplotlib>=3.10.0",
     "numpy<2.0",
     "pandas>=2.2.3",
+    "pandapower==2.13.1",
     "pypowsybl>=1.14.0",
     "pypsa>=0.28.0",
     "pyscipopt>=5.3.0",
     "pyshp>=2.3.1",
     "pytorch-lightning>=2.5.1",
-    "scikit-learn>=1.8.0",
+    "scikit-learn>=1.6.0",
     "seaborn>=0.13.2",
     "shapely>=2.0.7",
     "statsmodels>=0.14.6",
@@ -29,3 +30,21 @@ dependencies = [
 dev = [
     "ipykernel>=6.29.5",
 ]
+cuda = [
+    "torch-cluster @ https://data.pyg.org/whl/torch-2.6.0%2Bcu124/torch_cluster-1.6.3%2Bpt26cu124-cp311-cp311-win_amd64.whl",
+    "torch-scatter @ https://data.pyg.org/whl/torch-2.6.0%2Bcu124/torch_scatter-2.1.2%2Bpt26cu124-cp311-cp311-win_amd64.whl",
+    "torch-sparse @ https://data.pyg.org/whl/torch-2.6.0%2Bcu124/torch_sparse-0.6.18%2Bpt26cu124-cp311-cp311-win_amd64.whl",
+    "torch-spline-conv @ https://data.pyg.org/whl/torch-2.6.0%2Bcu124/torch_spline_conv-1.2.2%2Bpt26cu124-cp311-cp311-win_amd64.whl",
+]
+
+[tool.uv]
+default-groups = ["dev", "cuda"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+torchvision = { index = "pytorch-cu124" }
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
