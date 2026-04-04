@@ -163,7 +163,7 @@ Target: turn the codebase into an installable Python package suitable for reuse 
 
 Target: reproducible execution in Docker and cloud runtimes, including Databricks-oriented workflows.
 
-### Container basics
+### Container basics (Suggestion, to be decided)
 - [ ] Add a production-oriented Dockerfile.
 - [ ] Use a small Python base image.
 - [ ] Consider a multi-stage build.
@@ -171,17 +171,29 @@ Target: reproducible execution in Docker and cloud runtimes, including Databrick
 - [ ] Run as a non-root user where practical.
 - [ ] Make logs/stdout behavior container-friendly.
 
-### Databricks readiness
+### Databricks readiness (Suggestiong, to be decided)
 - [ ] Define one reproducible batch entrypoint for training/sweeps.
 - [ ] Define one entrypoint for post-run analysis/export.
 - [ ] Ensure outputs can be written to mounted/cloud paths cleanly.
 - [ ] Avoid notebook-only assumptions in execution logic.
 - [ ] Document environment variables and expected filesystem layout.
 
+
+
 ### Reproducibility
 - [ ] Make random seed handling explicit and centralized.
 - [ ] Record environment/package versions in outputs.
 - [ ] Store enough metadata to reproduce a run from saved results.
+
+## Future research goals
+Use GNN inference/predictions as surrogate for PF in contingency simulations
+### Extension for stochastic simulation (Neccessary for further research - might be a new package related to this)
+- [ ] Implement contingency logic in training (Guided Dropout or similar?)
+- [ ] Implement open-loop version contingency logic must be expanded with best-backup choice (optimization method to be decided)
+- [ ] Implement sampling from failure probability models for stochastic contingency simulariong
+- [ ] Implement probabilistic load per node based on model (model and parameters to be decided)
+- [ ] Implement dynamic line rating model for lines, cables and transformers.
+- [ ] Implement stochastic simulation of all three variables and resulting limit violations
 
 ---
 
