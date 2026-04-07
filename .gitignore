@@ -6,7 +6,11 @@ training_results_saved/
 training_networks_saved/
 physics_comparison_results/
 grid_model_files/
+Good_run_results/
 code_base.py
 GNN_Powerflow_V2.3 - Multi_network_implementation.html
 GNN_Powerflow_V2.1.2.html
 GNN_Powerflow_V2.4.backup 1.ipynb
+GNN_Powerflow_V2.4.1.ipynb
+GNN_Powerflow_V2.4_tempfile1.ipynb
+GNN_Powerflow_V2.4_tempfile2.ipynb
