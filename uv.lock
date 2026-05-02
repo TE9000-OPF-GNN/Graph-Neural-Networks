@@ -587,6 +587,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pandapower" },
     { name = "pandas" },
+    { name = "pypower" },
     { name = "pypowsybl" },
     { name = "pypsa" },
     { name = "pyscipopt" },
@@ -621,6 +622,7 @@ requires-dist = [
     { name = "numpy", specifier = "<2.0" },
     { name = "pandapower", specifier = "==2.13.1" },
     { name = "pandas", specifier = ">=2.2.3" },
+    { name = "pypower", specifier = ">=5.1.19" },
     { name = "pypowsybl", specifier = ">=1.14.0" },
     { name = "pypsa", specifier = ">=0.28.0" },
     { name = "pyscipopt", specifier = ">=5.3.0" },
@@ -1893,6 +1895,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pypower"
+version = "5.1.19"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/35/6e/9d0843a0b5b2e4295da0b50be1260f960a2b7aa2aa95ffaa2423886bd769/pypower-5.1.19.tar.gz", hash = "sha256:ce7c67cd51d93704f37dd87ad08cbd1ea8b9e9174eebbfbd4195a8bf0f60bebd", size = 249307, upload-time = "2025-07-10T17:17:50.265Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ae/49/23ec0b49b8605e280b9b3f82436c3e5e016711bd1f7c747ede912d15b446/pypower-5.1.19-py2.py3-none-any.whl", hash = "sha256:e55a1a690b2177aa1c9eaf637c7e51ebe42c7bba2d74ffbf753be675dc378a4d", size = 347564, upload-time = "2025-07-10T17:17:48.098Z" },
+]
+
+[[package]]
 name = "pypowsybl"
 version = "1.14.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2400,8 +2411,8 @@ dependencies = [
     { name = "typing-extensions" },
 ]
 wheels = [
-    { url = "https://download.pytorch.org/whl/cu124/torch-2.6.0%2Bcu124-cp311-cp311-linux_x86_64.whl", hash = "sha256:d4c3e9a8d31a7c0fcbb9da17c31a1917e1fac26c566a4cfbd8c9568ad7cade79" },
-    { url = "https://download.pytorch.org/whl/cu124/torch-2.6.0%2Bcu124-cp311-cp311-win_amd64.whl", hash = "sha256:6a1fb2714e9323f11edb6e8abf7aad5f79e45ad25c081cde87681a18d99c29eb" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torch-2.6.0%2Bcu124-cp311-cp311-linux_x86_64.whl", hash = "sha256:d4c3e9a8d31a7c0fcbb9da17c31a1917e1fac26c566a4cfbd8c9568ad7cade79", upload-time = "2025-01-30T00:55:01Z" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torch-2.6.0%2Bcu124-cp311-cp311-win_amd64.whl", hash = "sha256:6a1fb2714e9323f11edb6e8abf7aad5f79e45ad25c081cde87681a18d99c29eb", upload-time = "2025-01-30T00:55:31Z" },
 ]
 
 [[package]]
@@ -2516,8 +2527,8 @@ dependencies = [
     { name = "torch" },
 ]
 wheels = [
-    { url = "https://download-r2.pytorch.org/whl/cu124/torchvision-0.21.0%2Bcu124-cp311-cp311-linux_x86_64.whl", hash = "sha256:137376805aca5ba57bd2c7a3ecb8569df961dbe82b128aac9b3b0a7125ef9385" },
-    { url = "https://download-r2.pytorch.org/whl/cu124/torchvision-0.21.0%2Bcu124-cp311-cp311-win_amd64.whl", hash = "sha256:000a013584ad2304ab30496318145f284ac364622addb5ee3a5abd2769ba146f" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torchvision-0.21.0%2Bcu124-cp311-cp311-linux_x86_64.whl", hash = "sha256:137376805aca5ba57bd2c7a3ecb8569df961dbe82b128aac9b3b0a7125ef9385", upload-time = "2025-01-30T01:04:28Z" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torchvision-0.21.0%2Bcu124-cp311-cp311-win_amd64.whl", hash = "sha256:000a013584ad2304ab30496318145f284ac364622addb5ee3a5abd2769ba146f", upload-time = "2025-01-30T01:04:29Z" },
 ]
 
 [[package]]
