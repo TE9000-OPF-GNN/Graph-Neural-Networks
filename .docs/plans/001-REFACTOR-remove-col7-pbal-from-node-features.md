@@ -1,13 +1,13 @@
 ---
 type: REFACTOR
-status: todo
+status: done
 priority: High
 effort: 2h
 labels: [training, analysis, node-features]
 depends-on: []
 created: 2026-05-10
-completed:
-summary: ""
+completed: 2026-05-10
+summary: "Removed col7 (p_bal_col) from node features, synced Analysis _create_graph_data to Training, updated thresholds >=9 to >=8, added use_pnom_share to Training predict_network, cleaned up dead use_pnet_balance flags"
 ---
 
 # Remove col7 (p_bal_col) from node features + sync Analysis
@@ -299,13 +299,13 @@ After all patches, run `git diff` and confirm:
 
 ## Acceptance Criteria
 
-- [ ] Training `_create_graph_data` produces 8 features (not 9) when `use_pnom_share=True`
-- [ ] Analysis `_create_graph_data` produces 8 features and matches Training logic exactly (no p_net_balance)
-- [ ] Auto-detect threshold is `>= 8` in all 3 locations
-- [ ] Training `predict_network_results_with_masks` accepts `use_pnom_share=None` with auto-detect
-- [ ] `data.p_net_balance` is no longer stored in either notebook
-- [ ] `use_pnet_balance` removed from `train_power_flow_gnn`, `evaluate_gnn_on_test_set` (both notebooks), and `check_hparam_results` call site
-- [ ] `PowerFlowDataset.__init__` still accepts `use_pnet_balance` (ignored) so backfill functions don't break
-- [ ] Old 7-feature models still work (base features unaffected)
-- [ ] `git diff` shows no unintended changes
-- [ ] Both notebooks parse as valid JSON after patching
+- [x] Training `_create_graph_data` produces 8 features (not 9) when `use_pnom_share=True`
+- [x] Analysis `_create_graph_data` produces 8 features and matches Training logic exactly (no p_net_balance)
+- [x] Auto-detect threshold is `>= 8` in all 3 locations
+- [x] Training `predict_network_results_with_masks` accepts `use_pnom_share=None` with auto-detect
+- [x] `data.p_net_balance` is no longer stored in either notebook
+- [x] `use_pnet_balance` removed from `train_power_flow_gnn`, `evaluate_gnn_on_test_set` (both notebooks), and `check_hparam_results` call site
+- [x] `PowerFlowDataset.__init__` still accepts `use_pnet_balance` (ignored) so backfill functions don't break
+- [x] Old 7-feature models still work (base features unaffected)
+- [x] `git diff` shows no unintended changes
+- [x] Both notebooks parse as valid JSON after patching
