@@ -1,13 +1,13 @@
 ---
 type: REFACTOR
-status: todo
+status: done
 priority: Medium
 effort: 2h
 labels: [training, analysis, sweep-infrastructure]
 depends-on: []
 created: 2026-05-10
-completed:
-summary: ""
+completed: 2026-05-10
+summary: "Cleaned up run key/label/style infrastructure: simplified PhysicsConfig.label(), removed dead discriminators, added head_mode/conv_mode/drop_rate to all key/label/style/save/summary functions in both Training and Analysis notebooks."
 ---
 
 # Clean Up Run Key, Legend Label, and Style Infrastructure
@@ -347,11 +347,11 @@ And in the label-building section, remove the `n_node_features` block and `physi
 ```
 
 ## Acceptance Criteria
-- [ ] `PhysicsConfig.label()` output no longer contains `PB`, `AR`, `Qp`, or `mode-` prefixes
-- [ ] `build_legend_label` distinguishes runs that differ only on `head_mode`, `conv_mode`, or `drop_rate` (in both notebooks)
-- [ ] `_get_run_styles` assigns different colors/styles when `head_mode`, `conv_mode`, or `drop_rate` vary (in both notebooks)
-- [ ] `save_sweep_results` CSV includes `head_mode`, `conv_mode`, `drop_rate`, `use_pnom_share`, `node_feature_mode` columns and does NOT include `use_power_balance`, `use_angle_ref`, `use_q_partial`
-- [ ] `print_sweep_summary` shows `head_mode` and `conv_mode` columns (both notebooks)
-- [ ] `run_info` dict no longer contains `use_power_balance`, `use_angle_ref_penalty`, `use_q_partial_mode`
-- [ ] Training and Analysis notebook `build_legend_label` and `_get_run_styles` have the same candidate key lists
-- [ ] Old runs without new keys load gracefully (all `.get()` calls have defaults)
+- [x] `PhysicsConfig.label()` output no longer contains `PB`, `AR`, `Qp`, or `mode-` prefixes
+- [x] `build_legend_label` distinguishes runs that differ only on `head_mode`, `conv_mode`, or `drop_rate` (in both notebooks)
+- [x] `_get_run_styles` assigns different colors/styles when `head_mode`, `conv_mode`, or `drop_rate` vary (in both notebooks)
+- [x] `save_sweep_results` CSV includes `head_mode`, `conv_mode`, `drop_rate`, `use_pnom_share`, `node_feature_mode` columns and does NOT include `use_power_balance`, `use_angle_ref`, `use_q_partial`
+- [x] `print_sweep_summary` shows `head_mode` and `conv_mode` columns (both notebooks)
+- [x] `run_info` dict no longer contains `use_power_balance`, `use_angle_ref_penalty`, `use_q_partial_mode`
+- [x] Training and Analysis notebook `build_legend_label` and `_get_run_styles` have the same candidate key lists
+- [x] Old runs without new keys load gracefully (all `.get()` calls have defaults)

@@ -1,0 +1,235 @@
+\subsection{Graph Neural Networks for AC Power Flow Prediction}
+
+\subsubsection{Data Representation}
+
+Each snapshot in the dataset contains both known inputs and reference power-flow states from PyPSA AC power flow solutions. The data is represented as a graph where nodes correspond to buses and edges represent transmission lines and transformers.
+
+\paragraph{Node features.}
+At each bus $i$, the node feature vector contains:
+\begin{itemize}
+    \item $x_{i,0}$, $x_{i,1}$, $x_{i,2}$: one-hot encoding of bus type ($t_i \in \{\text{Slack},\, \text{PV},\, \text{PQ}\}$),
+    \item $x_{i,3}$: $P_i^{\text{in}}$, known active power injection (zero for slack buses),
+    \item $x_{i,4}$: $Q_i^{\text{in}}$, known reactive power injection (zero for slack and PV buses),
+    \item $x_{i,5}$: $V_{i,\text{ref}}^{\text{mag}}$, reference voltage magnitude (known for PV and slack buses, zero for PQ buses),
+    \item $x_{i,6}$: $V_{i,\text{ref}}^{\text{ang}}$, reference voltage angle in radians (zero for PQ and PV buses),
+    \item $x_{i,7}$ (optional): $p_{i}^{\text{nom,share}}$, relative generator capacity share $p_{\text{nom},i} / \sum_j p_{\text{nom},j}$ at generator buses (enabled via \texttt{use\_pnom\_share=True}).
+\end{itemize}
+
+The node feature count is thus 7 by default or 8 when the capacity-share feature is enabled. The capacity-share feature is used in single-network training to allow the model to learn how load changes distribute across generators in proportion to their capacity; it is disabled in mixed-network training to promote topology-agnostic generalization.
+
+\paragraph{Edge features.}
+Each directed edge $(i \to j)$ corresponding to a line or transformer carries electrical properties:
+\begin{itemize}
+    \item Series resistance $r_{ij}$, series reactance $x_{ij}$,
+    \item Shunt susceptance $b_{ij}$,
+    \item Apparent power rating $S_{ij}$ (nominal capacity),
+    \item PTDF coefficients (when using learned PTDF mode).
+\end{itemize}
+
+The undirected graph is represented as a bidirectional directed graph, with each undirected edge creating two directed edges: one in each direction.
+
+\subsubsection{Model Architecture}
+
+\paragraph{Backbone: Graph Attention Network.}
+The core architecture is a Graph Attention Network (GAT)~\cite{velickovic_graph_2018, brody_how_2022}, chosen for its ability to learn adaptive node-neighborhood weights without requiring prior knowledge of graph structure or expensive matrix operations. Alternative architectures such as Graph Convolutional Networks (GCN)~\cite{kipf_semi-supervised_2017} are also supported.
+
+The model flow is as follows:
+\begin{enumerate}
+    \item \textbf{Node embedding}: Project input features $x_i$ to hidden dimension via a linear layer:
+    \[ h_i^{(0)} = W_{\text{emb}} x_i + b_{\text{emb}}, \]
+    \item \textbf{Graph convolution layers}: Apply $L$ stacked attention or convolutional layers with configurable residual and normalization options:
+    \[ h_i^{(\ell)} = \sigma\left( \text{Aggregate}(h_i^{(\ell-1)}, \{h_j^{(\ell-1)}: j \in \mathcal{N}(i)\}) \right), \]
+    where $\mathcal{N}(i)$ is the neighborhood of node $i$, and $\sigma$ is the activation function (ReLU or GELU).
+    \item \textbf{Residual/normalization modes}: Four options for composing layers:
+    \begin{itemize}
+        \item \emph{old}: Sequential layers with ReLU activation (baseline),
+        \item \emph{residual}: Skip connections with GELU activation,
+        \item \emph{res\_norm}: Skip connections with layer normalization and GELU,
+        \item \emph{res\_norm\_drop}: Skip connections with layer normalization, GELU, and dropout.
+    \end{itemize}
+    \item \textbf{Output heads}: The final node embeddings $h_i^{(L)}$ are passed to bus-type-specific prediction heads:
+    \begin{itemize}
+        \item \emph{Standard mode}: Four independent heads (Vmag, Vang, P, Q), each trained on all nodes and masked in the loss to enforce physical constraints.
+        \item \emph{Encoder mode}: Three specialized heads (PQ head, PV head, Slack head), each trained only on buses of its assigned type, with structural enforcement of constraints (e.g., slack bus angle is fixed to zero).
+    \end{itemize}
+    \item \textbf{Edge embeddings for PTDF}: Concatenate source and destination node embeddings with edge features, pass through an MLP to obtain edge representations $h_e$, used for bilinear PTDF prediction.
+\end{enumerate}
+
+\paragraph{Initial hyperparameters.}
+The following hyperparameters are used as default values, informed by prior work on power-system GNNs~\cite{taghizadeh_multi-fidelity_2024} and general graph learning practices~\cite{morris_weisfeiler_2021}:
+\begin{itemize}
+    \item Number of layers: $L = 3$,
+    \item Hidden dimension: 64,
+    \item Activation: ReLU (baseline) or GELU (experimental),
+    \item Dropout rate: 0.1 (reduced from standard 0.5 due to GELU usage~\cite{hendrycks_gaussian_2023}),
+    \item Batch size: 1 or 32 (per-graph or mini-batch batching),
+    \item Learning rate: $5 \times 10^{-4}$ (based on recommendations in~\cite{velickovic_graph_2018}),
+    \item Optimizer: Adam with default $\beta_1=0.9$, $\beta_2=0.999$.
+\end{itemize}
+
+\subsubsection{Physics-Informed Loss}
+
+The training objective combines supervised regression with physics-informed constraints to ensure predicted voltages satisfy AC power-flow equations.
+
+\paragraph{Supervised loss (MSE).}
+The model predicts voltage magnitude and angle at all buses, and active/reactive power at slack buses. A masked mean-squared error loss compares predictions to PyPSA reference solutions:
+\begin{equation}
+    \mathcal{L}_{\text{MSE}}
+    = \frac{1}{N}
+    \sum_{i=1}^{N}
+    M_i^{(\text{out})} \left[
+        \bigl(\hat{v}_i      - v_i^{\ast}\bigr)^2
+      + \bigl(\hat{\theta}_i - \theta_i^{\ast}\bigr)^2
+      + \bigl(\hat{P}_i      - P_i^{\ast}\bigr)^2
+      + \bigl(\hat{Q}_i      - Q_i^{\ast}\bigr)^2
+    \right],
+\end{equation}
+where $M_i^{(\text{out})} \in \{0, 1\}$ is a mask that selects outputs corresponding to each bus type (e.g., slack buses have $M_i^{(\text{out})} = 1$ for P and Q only).
+
+\paragraph{Physics-informed power balance residual.}
+From predicted complex voltages $\hat{V}_i = \hat{v}_i e^{j\hat{\theta}_i}$, nodal currents are computed via the network admittance matrix $Y = G + jB$:
+\begin{equation}
+    \hat{I}_i = \sum_{k=1}^{N} Y_{ik}\,\hat{V}_k.
+\end{equation}
+The calculated complex power injection is:
+\begin{equation}
+    \hat{S}_i^{\text{calc}}
+    = \hat{P}_i^{\text{calc}} + j\hat{Q}_i^{\text{calc}}
+    = \hat{V}_i\,\overline{\hat{I}_i}.
+\end{equation}
+
+The active power residual at all buses enforces Kirchhoff's current law (real part):
+\begin{equation}
+    r_{P,i} = \hat{P}_i^{\text{calc}} - P_i^{\text{inj}},
+    \quad P_i^{\text{inj}} = \begin{cases}
+        P_i^{\text{in}} & t_i \in \{\text{PQ},\, \text{PV}\} \\
+        \hat{P}_i       & t_i = \text{slack}
+    \end{cases}
+\end{equation}
+
+For reactive power, two formulations are available:
+\begin{enumerate}
+    \item \emph{PQ-only}: Residuals enforced only at PQ buses where $Q$ is fully specified:
+    \begin{equation}
+        r_{Q,i}^{\text{(PQ-only)}} = \begin{cases}
+            \hat{Q}_i^{\text{calc}} - Q_i^{\text{in}} & t_i = \text{PQ} \\
+            0 & \text{otherwise}
+        \end{cases}
+    \end{equation}
+    \item \emph{Full-Q}: Residuals extended to all buses using PyPSA reference $Q_i^{\ast}$ as supervision at PV and slack buses:
+    \begin{equation}
+        r_{Q,i}^{\text{(full)}} = \begin{cases}
+            \hat{Q}_i^{\text{calc}} - Q_i^{\text{in}} & t_i = \text{PQ} \\
+            \hat{Q}_i^{\text{calc}} - Q_i^{\ast} & t_i \in \{\text{PV},\, \text{slack}\}
+        \end{cases}
+    \end{equation}
+    In the full-Q case, gradients flow through predicted voltages (not the output $\hat{Q}_i$), creating a physics-consistent learning signal.
+\end{enumerate}
+
+The combined power balance loss is:
+\begin{equation}
+    \mathcal{L}_{\text{PQ}}
+    = \frac{1}{N} \left[
+        \sum_{i=1}^{N} r_{P,i}^2 + \sum_{i=1}^{N} r_{Q,i}^2
+    \right],
+\end{equation}
+where $r_{Q,i}$ is drawn from either the PQ-only or full-Q formulation.
+
+\paragraph{Voltage angle reference constraint.}
+To fix the voltage angle reference (otherwise underdetermined in AC power flow), a soft constraint enforces zero mean angle at all slack buses:
+\begin{equation}
+    \mathcal{L}_{\theta} = \left(
+        \frac{1}{|\mathcal{S}|} \sum_{i \in \mathcal{S}} \hat{\theta}_i
+    \right)^2,
+\end{equation}
+where $\mathcal{S}$ is the set of slack buses. In single-slack systems this pins the slack angle to zero; in systems with multiple slack buses (distributed slack), it enforces a zero mean across them.
+
+\paragraph{Power Transfer Distribution Factor (PTDF) loss.}
+The PTDF matrix $\Pi \in \mathbb{R}^{n_{\text{lines}} \times n_{\text{buses}}}$ maps changes in bus active power injection to changes in line real power flow. Given the model's node and edge embeddings, a bilinear form predicts PTDF coefficients:
+\begin{equation}
+    \hat{\Pi}_{k,i} = h_e^{(k)} W_{\text{PTDF}} h_n^{(i)},
+\end{equation}
+where $h_e^{(k)}$ is the embedding of edge $k$ (line) and $h_n^{(i)}$ is the node embedding of bus $i$, and $W_{\text{PTDF}}$ is a learned weight matrix. The PTDF loss compares predicted and reference matrices:
+\begin{equation}
+    \mathcal{L}_{\text{PTDF}} = \frac{1}{n_{\text{lines}} \times n_{\text{buses}}}
+    \sum_{k=1}^{n_{\text{lines}}} \sum_{i=1}^{n_{\text{buses}}}
+    \left( \hat{\Pi}_{k,i} - \Pi_{k,i}^{\ast} \right)^2,
+\end{equation}
+where $\Pi^{\ast}$ is the reference PTDF from PyPSA. This term is optional and controlled by configuration flags.
+
+\paragraph{Combined training loss.}
+The total loss is:
+\begin{equation}
+    \mathcal{L}_{\text{total}}
+    = \mathcal{L}_{\text{MSE}}
+    + \lambda_{\text{phys}} \bigl( \mathcal{L}_{\text{PQ}} + \mathcal{L}_{\theta} \bigr)
+    + \lambda_{\text{PTDF}} \mathcal{L}_{\text{PTDF}},
+\end{equation}
+where $\lambda_{\text{phys}}$ and $\lambda_{\text{PTDF}}$ are weighting parameters. The physics weight can be ramped from 0 during an initial warmup period to stabilize early training~\cite{huang_applications_2023}.
+
+\subsubsection{Training Procedure}
+
+\paragraph{Data preparation.}
+Training and validation datasets are constructed from PyPSA networks saved to disk. Each network has multiple snapshots (time steps) with varying load and generation patterns. Snapshots are grouped into separate PyTorch Geometric Data objects and batched together for training.
+
+\paragraph{Training loop.}
+\begin{enumerate}
+    \item Initialize model with Xavier uniform weight initialization~\cite{he_deep_2015}.
+    \item For each epoch:
+    \begin{enumerate}
+        \item Iterate over mini-batches from the training loader (batch size 1 or 32 per configuration).
+        \item Forward pass through the GNN to obtain predictions and embeddings.
+        \item Compute masked MSE loss.
+        \item Compute physics loss (power balance + angle reference) per-graph.
+        \item Compute PTDF loss if enabled.
+        \item Combine losses and backpropagate.
+        \item Update weights using Adam optimizer.
+    \end{enumerate}
+    \item After each epoch, evaluate on validation set using the same loss function.
+    \item Optionally apply learning rate scheduling (exponential decay or step-wise reduction).
+    \item Save model checkpoint and run metadata at the end of training.
+\end{enumerate}
+
+\paragraph{Model output.}
+The forward pass returns a tuple: (node predictions, PTDF predictions). Node predictions have shape $[n_{\text{nodes}}, 4]$ containing $[\hat{v}, \hat{\theta}, \hat{P}, \hat{Q}]$. PTDF predictions have shape $[n_{\text{edges}}, n_{\text{nodes}}]$ for line-by-node PTDF coefficients.
+
+\subsubsection{Post-Processing and Evaluation}
+
+\paragraph{Line flow calculation.}
+From predicted nodal voltages, AC line flows are calculated using the standard admittance-based formula. For each line, the sending-end and receiving-end real and reactive power flows are computed from the complex voltage and line impedance parameters.
+
+\paragraph{Masking and physical constraints.}
+At inference, predictions are masked according to the bus type before computing any metrics:
+\begin{itemize}
+    \item Slack buses: Use known Vmag (reference), predicted Vang is constrained to zero, use predicted P and Q.
+    \item PV buses: Use known Vmag, use predicted Vang and Q, use known P.
+    \item PQ buses: Use predicted Vmag and Vang, use known P and Q.
+\end{itemize}
+
+\paragraph{Evaluation metrics.}
+Performance is assessed using root-mean-squared error (RMSE) and mean absolute error (MAE) on voltage magnitudes, angles, active and reactive power. Separate metrics are computed for each bus type and aggregated across the test set. Line flow errors are also computed where applicable.
+
+\subsubsection{Hyperparameter Sweep}
+
+A grid or random search over key hyperparameters is performed to identify configurations with optimal validation performance. Typical sweep ranges are provided in Table~\ref{tab:hyperparameters}.
+
+\begin{table}[t]
+\centering
+\caption{GNN hyperparameter search configuration.}
+\label{tab:hyperparameters}
+\begin{tabular}{llll}
+\hline
+\textbf{Hyperparameter} & \textbf{Default} & \textbf{Search range} & \textbf{Justification} \\
+\hline
+Number of layers & 3 & \{2, 3, 4, 5\} & Taghizadeh et al.~\cite{taghizadeh_multi-fidelity_2024} \\
+Hidden dimension & 64 & \{32, 64, 128, 256\} & Same \\
+Learning rate & $5 \times 10^{-4}$ & $[10^{-4}, 10^{-3}]$ (log scale) & Veličković et al.~\cite{velickovic_graph_2018} \\
+Activation & ReLU & \{ReLU, GELU\} & GELU per Hendrycks \& Gimpel~\cite{hendrycks_gaussian_2023} \\
+Dropout & 0.1 & $[0.0, 0.5]$ & Srivastava et al.~\cite{srivastava_dropout_2014}; reduced with GELU \\
+Batch size & 1 & \{1, 32\} & Per-graph vs. mini-batch \\
+Conv mode & old & \{old, residual, res\_norm, res\_norm\_drop\} & Architectural variants \\
+Physics weight $\lambda_{\text{phys}}$ & 0.1 & $[0.0, 1.0]$ & Ablation \\
+PTDF weight $\lambda_{\text{PTDF}}$ & 0.01 & $[0.0, 0.5]$ & Ablation \\
+\hline
+\end{tabular}
+\end{table}
