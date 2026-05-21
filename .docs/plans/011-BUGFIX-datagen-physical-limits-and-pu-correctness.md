@@ -1,81 +1,160 @@
-# Plan 011 — BUGFIX: DataGen Physical Limits & pu Correctness
-
-**Status**: Revised — research complete; tasks reordered by priority  
-**Priority**: High — affects data quality of all newly generated training sets  
-**Research artifacts**:
-- [2026-05-21-negative-rxb-and-transformer-handling.md](../research/2026-05-21-negative-rxb-and-transformer-handling.md)
-- [2026-05-21-sn-mva-s-nom-v-nom-safety-check.md](../research/2026-05-21-sn-mva-s-nom-v-nom-safety-check.md)
-- [2026-05-21-transformer-turns-ratio-flat-pu-consistency.md](../research/2026-05-21-transformer-turns-ratio-flat-pu-consistency.md)
-
-**Notebook**: `GNN_Powerflow_V2.6_DataGen.ipynb`
-
+---
+type: BUGFIX
+status: todo
+priority: High
+effort: 1h
+labels: [datagen, pypsa, data-quality]
+depends-on: []
+created: 2026-05-21
+completed:
+summary: ""
 ---
 
-## Intention
+# Fix DataGen Physical Limits and pu Correctness
 
-Fix data quality issues in `load_system_from_csv` and `sanity_check_power_flow` that cause generated PyPSA networks to have non-physical parameters or lack visible post-solve validation. The core flat-pu modeling (`v_nom=1.0`, `tap_ratio=1.0`) is **confirmed correct** — do not change it.
+## Problem
 
----
+`load_system_from_csv` passes raw `b` values from CSV directly to PyPSA without clamping. Three lines in the local `ieee30_lines.csv` have negative `b` (cross-voltage-level artifact from a stale file) — values like −14.3 pu are 100–1000× the normal line charging range and corrupt the Y-bus and PF results for IEEE30. Additionally, `n.sn_mva` defaults to `1.0` instead of `100.0`, causing diagnostic outputs and MW/MVAr conversions to show wrong magnitude. `sanity_check_power_flow` has no KCL consistency check, so a network with modeling inconsistencies (e.g. the negative-b case) can pass all existing checks and produce silently wrong results.
 
-## Tasks
+**Note (2026-05-21)**: Task F (revert `q_min_pu`/`q_max_pu`) was already completed — verified no such attributes exist in the current notebook.
 
-### REVERT REQUIRED
+## Solution
 
-- [ ] **F. REVERT Generator Q limits patch** — The `q_min_pu`/`q_max_pu` attributes added in commit `4dfe772` are **not valid PyPSA 0.28 Generator attributes**. PyPSA silently ignores them with a per-generator WARNING on every `add()` call. This generates ~100+ log lines per network and has zero effect on the power flow solution. **Action**: revert the patch to `load_system_from_csv` in cell 20 — remove the `q_min_raw`/`q_max_raw` block and `gen_kw["q_min_pu"]`/`gen_kw["q_max_pu"]` conditionals. Revert via surgical disk patch. Note: real Q limit enforcement in PyPSA would require a post-pf() PV→PQ bus-switching loop and is out of scope.
+Three targeted changes, all using the surgical disk patching protocol:
 
-### PENDING — safe to implement
+**A. Clamp `b` to `≥ 0` in `load_system_from_csv`**  
+Wrap the `b_val` assignment in `max(..., 0.0)`. The fix is defense-in-depth: OneDrive CSVs already have `b ≥ 0` after the cross-VL fix, but stale local files do not. One line change; no side effects.
 
-- [ ] **A. Clamp b to ≥ 0 in line loading** — `load_system_from_csv` does not clamp the `b` value read from CSV. Three lines in the stale local ieee30 CSV have negative b. Add defense-in-depth floor:
-  ```python
-  b_val = max(float(row.get("b1", 0.0) or 0.0) + float(row.get("b2", 0.0) or 0.0), 0.0)
-  ```
-  Low risk. OneDrive CSVs already have b≥0 after the cross-VL fix; this is a guard for local stale files.
+**B. Set `n.sn_mva = 100.0` immediately after `pypsa.Network()`**  
+`sn_mva` is metadata only — PyPSA `pf.py` does not read it at any point (zero hits in source). Safe to add without affecting the PF solution. Makes `n.summary()` and any downstream MW/MVAr diagnostic show the correct base.
 
-- [ ] **B. Set `n.sn_mva = 100.0`** — PyPSA default is `sn_mva=1.0`; all P/Q/Z in CSVs are on 100 MVA base. **Cosmetic only** — PyPSA does not use `sn_mva` in any power flow computation (confirmed in `pf.py` source: zero hits). But it makes diagnostic functions and MW/MVAr conversions show correct magnitude.
-  ```python
-  n = pypsa.Network()
-  n.sn_mva = 100.0
-  ```
-  Safe to implement independently (does NOT affect impedance values or PF solution).
+**G. Add KCL balance check to `sanity_check_power_flow`**  
+After all existing checks pass, compute `|gen_P − load_P − losses| / |gen_P|`. This is expected to be `< 1e-5` for a well-converged AC PF. Values `> 1e-3` indicate a modeling inconsistency that the solver "solved" by converging to a wrong operating point. New `max_balance_err=1e-3` parameter (default keeps backward compatibility).
 
-- [ ] **G. System power balance check in `sanity_check_power_flow`** — Add a visible KCL consistency check after successful PF. New `max_balance_err=1e-3` parameter:
-  ```python
-  # Check 2c: system power balance (KCL)
-  gen_p  = network.generators_t.p.values.sum()
-  load_p = network.loads_t.p.values.sum()
-  line_loss = (network.lines_t.p0.values + network.lines_t.p1.values).sum()
-  traf_p = (network.transformers_t.p0.values + network.transformers_t.p1.values)
-  traf_loss = traf_p.sum() if traf_p.size > 0 else 0.0
-  balance_err = abs(gen_p - load_p - line_loss - traf_loss) / max(abs(gen_p), 1e-6)
-  if balance_err > max_balance_err:
-      raise RuntimeError(f"Power balance error {balance_err:.2e}")
-  ```
-  Expected for well-converged AC PF: balance_err < 1e-5. Errors > 1e-3 indicate modeling inconsistency. Add `max_balance_err=1e-3` to function signature.
+**Why not tasks C and D?**  
+Research confirmed: changing `s_nom=100` (task C) would make PyPSA compute `r_pu = r/100`, shrinking transformer admittances 100×. Changing `v_nom=actual_kV` (task D) would make PyPSA compute `r_pu = r/kV²`, shrinking line admittances 17,424× for 132 kV buses. Both would corrupt the Y-bus. The current flat-pu system (`v_nom=1.0`, `s_nom=1.0`) is mathematically self-consistent. These are **not** to be implemented.
 
-### DEFERRED / DO NOT IMPLEMENT AS DESCRIBED
+## Scope
 
-- [~~C~~] ~~**Transformer s_nom default to 100.0**~~ — **DANGEROUS — do not implement.** Research confirmed: with the flat-pu system (`v_nom=1.0`, `s_nom=1.0`), PyPSA computes `r_pu = r / s_nom = r / 1.0 = r`. If `s_nom` is changed to 100 without rescaling `r`/`x`/`b`, the admittances become 100× larger (more conductive) — fundamentally corrupting the Y-bus and all PF solutions. The current `s_nom=1.0` is **intentional** and correct for the flat-pu convention. See [sn-mva-s-nom-v-nom-safety-check.md](../research/2026-05-21-sn-mva-s-nom-v-nom-safety-check.md).
+**Included:**
+- `load_system_from_csv` in cell 19 of `GNN_Powerflow_V2.6_DataGen.ipynb`: clamp b (task A) + set sn_mva (task B)
+- `sanity_check_power_flow` in cell 16: add `max_balance_err` parameter + check 2c (task G)
 
-- [~~D~~] ~~**Transformer v_nom from actual kV / tap_ratio from turns ratio**~~ — **DEFERRED.** Research confirmed the flat-pu system is correct: for nominal-tap transformers, `z_HV_pu = z_LV_pu` (verified numerically for all 4 ieee30 transformers), so `Y00 = Y11 = y_se` with `tap_ratio=1.0` is the mathematically correct Y-bus. The physical kV interpretation is wrong, but the numerical PF solution is identical to the proper multi-voltage system. Changing to actual kV would require re-normalising ALL line and transformer impedances — a full re-parametrisation that goes beyond a bugfix. OLTC variation (off-nominal tap) is a separate future enhancement. See [transformer-turns-ratio-flat-pu-consistency.md](../research/2026-05-21-transformer-turns-ratio-flat-pu-consistency.md).
+**Not Included:**
+- Transformer `s_nom` or `v_nom`/`tap_ratio` changes (confirmed dangerous)
+- Retroactive regeneration of existing datasets
+- Q-limit enforcement (would require PV→PQ bus-switching loop; out of scope)
+- `create_csv_based_topology_variant` perturbation path (already clamps `b ≥ 0` post-perturbation)
 
----
+## Affected Files
 
-## Constraints
+| File | Change |
+|------|--------|
+| `GNN_Powerflow_V2.6_DataGen.ipynb` cell 19 (`load_system_from_csv`) | Clamp `b_val ≥ 0`; add `n.sn_mva = 100.0` |
+| `GNN_Powerflow_V2.6_DataGen.ipynb` cell 16 (`sanity_check_power_flow`) | Add `max_balance_err=1e-3` param; add check 2c |
 
-- **Surgical disk patching protocol**: all changes to `.ipynb` must use Python patch scripts with `open(..., newline='\n')`. Always `git commit` checkpoint before patching. Verify with `git diff` before keeping.
-- **No kernel-state changes**: patching `.ipynb` on disk does not update the in-kernel function. The kernel must re-execute cell 20 (`load_system_from_csv`) after any patch.
-- **Flat-pu is correct — do not change it**: `v_nom=1.0`, `s_nom=1.0`, `tap_ratio=1.0` are all intentional and self-consistent. Research confirmed tasks C and D would corrupt the Y-bus.
-- **Tasks B and G are independent**: B (`sn_mva`) has zero effect on PF; G (balance check) reads post-PF results. Either can be done alone.
-- **Existing datasets**: not retroactively affected. Must regenerate for any structural changes to take effect.
-- **CIGRE14 format**: uses pandapower export format — any new columns will be absent. All fallback paths handle this silently.
+## Implementation Steps
 
----
+### 1. Clamp b in `load_system_from_csv` (cell 19)
 
-## Verification Steps
+**Before** (line 36):
+```python
+        b_val = float(row.get("b1", 0.0) or 0.0) + float(row.get("b2", 0.0) or 0.0)
+```
 
-| Task | Verification |
-|------|-------------|
-| F (revert Q limits) | `grep "q_min_pu" GNN_Powerflow_V2.6_DataGen.ipynb` → zero hits; run cell 20, verify no `q_min_pu` warnings in PyPSA output |
-| A (b clamp) | `python -c "import json; src=''.join(json.load(open('GNN_Powerflow_V2.6_DataGen.ipynb'))['cells'][19]['source']); print('b_val = max' in src)"` → True |
-| B (sn_mva) | After re-running cell 20: `net.sn_mva == 100.0`; verify `net.transformers["s_nom"].values` unchanged (still ~1.0) |
-| G (balance check) | After PF on ieee9: `sanity_check_power_flow(n, ...)` completes with no RuntimeError; balance_err logged < 1e-4 |
+**After**:
+```python
+        b_val = max(float(row.get("b1", 0.0) or 0.0) + float(row.get("b2", 0.0) or 0.0), 0.0)
+```
+
+### 2. Set `sn_mva` in `load_system_from_csv` (cell 19)
+
+**Before** (line 16–17):
+```python
+    n = pypsa.Network()
+
+    # Buses
+```
+
+**After**:
+```python
+    n = pypsa.Network()
+    n.sn_mva = 100.0  # cosmetic: all CSV data is on 100 MVA base
+
+    # Buses
+```
+
+### 3. Add balance check to `sanity_check_power_flow` (cell 16)
+
+**Before** — function signature (line 163–171):
+```python
+def sanity_check_power_flow(
+    network: pypsa.Network,
+    base_system: str,
+    require_connected: bool = True,
+    min_loads: int = 1,
+    voltage_max_threshold: float = 1.5,
+    voltage_min_threshold: float = 0.5,
+    max_angle: float = 180
+) -> None:
+```
+
+**After**:
+```python
+def sanity_check_power_flow(
+    network: pypsa.Network,
+    base_system: str,
+    require_connected: bool = True,
+    min_loads: int = 1,
+    voltage_max_threshold: float = 1.5,
+    voltage_min_threshold: float = 0.5,
+    max_angle: float = 180,
+    max_balance_err: float = 1e-3,
+) -> None:
+```
+
+Then, insert check 2c **before** the final `logger.info(...)` line (currently line 223).
+
+**Before** — end of function (lines 222–227):
+```python
+
+    logger.info(
+        f"{base_system}: PF sanity OK "
+        f"(buses={len(network.buses)}, gens={len(network.generators)}, "
+        f"loads={len(network.loads)})"
+    )
+```
+
+**After**:
+```python
+
+    # 2c) System power balance (KCL)
+    if hasattr(network, "generators_t") and hasattr(network.generators_t, "p"):
+        gen_p   = float(network.generators_t.p.values.sum())
+        load_p  = float(network.loads_t.p.values.sum())
+        line_loss = float((network.lines_t.p0.values + network.lines_t.p1.values).sum())
+        traf_arr = network.transformers_t.p0.values + network.transformers_t.p1.values
+        traf_loss = float(traf_arr.sum()) if traf_arr.size > 0 else 0.0
+        balance_err = abs(gen_p - load_p - line_loss - traf_loss) / max(abs(gen_p), 1e-6)
+        if balance_err > max_balance_err:
+            raise RuntimeError(
+                f"{base_system}: power balance error {balance_err:.2e} > {max_balance_err:.0e} "
+                f"(gen={gen_p:.4f}, load={load_p:.4f}, losses={line_loss+traf_loss:.6f})"
+            )
+
+    logger.info(
+        f"{base_system}: PF sanity OK "
+        f"(buses={len(network.buses)}, gens={len(network.generators)}, "
+        f"loads={len(network.loads)})"
+    )
+```
+
+## Acceptance Criteria
+
+- [ ] `python -c "import json; src=''.join(json.load(open('GNN_Powerflow_V2.6_DataGen.ipynb'))['cells'][19]['source']); assert 'b_val = max(' in src"` exits 0
+- [ ] `python -c "import json; src=''.join(json.load(open('GNN_Powerflow_V2.6_DataGen.ipynb'))['cells'][19]['source']); assert 'n.sn_mva = 100.0' in src"` exits 0
+- [ ] `python -c "import json; src=''.join(json.load(open('GNN_Powerflow_V2.6_DataGen.ipynb'))['cells'][16]['source']); assert 'max_balance_err' in src"` exits 0
+- [ ] After re-running cells 16 and 19: `load_system_from_csv("ieee9")` returns a network with `n.sn_mva == 100.0` and `n.transformers["s_nom"].iloc[0] ≈ 1.0` (sn_mva did not change transformer s_nom)
+- [ ] `sanity_check_power_flow(n_ieee9, "ieee9")` completes without RuntimeError; PyPSA log has no power balance warning
+- [ ] `sanity_check_power_flow(n_ieee30, "ieee30")` completes without RuntimeError (b clamp prevents negative-b crash)
+- [ ] No `q_min_pu` or `q_max_pu` strings anywhere in the notebook (task F remains clean)
