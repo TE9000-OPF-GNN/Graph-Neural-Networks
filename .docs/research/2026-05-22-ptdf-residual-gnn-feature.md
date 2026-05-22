@@ -147,6 +147,78 @@ for reconstruction during inference: `y_pred_abs = y_pred_residual + y_baseline`
 
 ---
 
+## Critical Architectural Constraint: Inference-Time Modularity (added 2026-05-22)
+
+**The core motivation is speed.** The DC baseline must be computable at inference time with NO
+PyPSA dependency and must be fast enough that it does NOT negate the GNN's speed advantage.
+
+### Two-phase separation (mandatory)
+
+**Phase 1 — Topology-dependent, computed ONCE per network (not per snapshot):**
+```
+ptdf_info = compute_ptdf_and_dc_info(network_topology)
+# Returns: (ptdf_df, B_red_inv [N-1, N-1], slack_idx, non_slack_indices)
+# Cost: one (N-1)×(N-1) matrix inversion.
+# ieee9: 8×8 ~microseconds; ieee118: 117×117 ~1–2 ms.
+# Must be stored/serialized alongside the model for inference.
+```
+
+**Phase 2 — Snapshot-dependent, called per solve request (during inference):**
+```
+y_baseline, x_with_baseline = compute_dc_baseline(
+    P_inj,          # [N] active power injections (known before AC solve)
+    Q_pq,           # [N] reactive power for PQ buses (known)
+    Vmag_known,     # [N] voltage setpoints (PV/slack, 0 for PQ)
+    bus_masks,      # (slack_mask, pv_mask, pq_mask)
+    ptdf_info,      # from Phase 1 (topology-static)
+    base_case_q,    # [N] base-case Q per generator bus (from precomputation)
+    base_case_p_gen # [N] base-case P per generator bus
+)
+# Returns: y_baseline [N, 4] and x_filled [N, 7]
+# Cost: one (N-1)-dimensional matrix-vector multiply + scalar arithmetic.
+# ieee9: ~microseconds; ieee118: ~microseconds.
+# NO PYPSA CALL. Pure numpy/torch operations.
+```
+
+### Why this decomposition works
+- `B_red_inv` depends only on network **topology** (line x values), not on operating point.
+  Topology changes rarely (contingency analysis) or never (steady-state study).
+- Per-snapshot cost is **O(N)** arithmetic + one O(N²) → O(N) matmul that is extremely cache-friendly.
+- At training time: Phase 1 happens in `PowerFlowDataset.__init__`; Phase 2 in `_create_graph_data`.
+- At inference time: Phase 1 runs once when the model is loaded; Phase 2 runs per prediction request.
+
+### Modularity requirement
+The `compute_dc_baseline` function must be a **pure function** (no side effects, no PyPSA calls)
+with a well-defined interface so it can be swapped for an alternative baseline provider later
+(e.g., fast linearized AC, warm-start from previous snapshot, learned baseline, etc.).
+
+**Interface contract:**
+```python
+def compute_dc_baseline(
+    P_inj: np.ndarray,       # [N] full bus active power injections (signed: gen>0, load<0)
+    Q_pq: np.ndarray,        # [N] known reactive power at PQ buses (0 elsewhere)
+    Vmag_slack_pv: np.ndarray, # [N] known Vmag for slack/PV buses (0 elsewhere)
+    bus_masks: tuple,          # (slack_mask, pv_mask, pq_mask) bool arrays [N]
+    B_red_inv: np.ndarray,   # [N-1, N-1] precomputed (topology-static)
+    slack_idx: int,
+    non_slack_indices: list,
+    base_case_q_gen: np.ndarray,  # [N] Q_gen at base operating point (gen buses only)
+    base_case_p_gen: np.ndarray,  # [N] P_gen at base operating point (gen buses only)
+) -> tuple[np.ndarray, np.ndarray]:
+    # Returns: (y_baseline [N,4], x_unknowns_filled [N,7])
+    ...
+```
+
+### Timing benchmark plan
+The implementation task must include a **standalone timing cell** in the training notebook:
+```python
+# Benchmark: baseline-only vs full AC PF
+# Should show baseline << DC PyPSA << AC PyPSA
+```
+Expected hierarchy: baseline (~0.01–0.1 ms) < PyPSA DC lpf (~2.6 ms) < AC pf (~200 ms per snap).
+
+---
+
 ## Constraints & Considerations
 
 - **`y_ptdf` (PTDF matrix)** stays on Data — can still be used for line-flow auxiliary loss.
@@ -154,37 +226,40 @@ for reconstruction during inference: `y_pred_abs = y_pred_residual + y_baseline`
 - **Physics loss compatibility**: `p_inj[pq_mask] = x[pq_mask, 3]` reads known P from `x` (col 3).
   In new design col 3 for PQ is still `P_known`, so this line is **unchanged and safe**.
   Only need to reconstruct absolute Vmag/Vang/P_slack/Q_gen before mismatch computation.
-- **`input_feature_filter`** rename to `fill_unknowns_with_baseline(node_features, bus_types, baseline)`.
-  Same bus-type logic, but assigns baseline values instead of 0.
-- **Base-case Q**: Requires that each PyPSA network has been solved at least once (true — DataGen runs AC PF for every snapshot). Use the **first snapshot** as base case per network.
-- **Inference pipeline**: At inference time, compute DC baseline from known inputs, pass as `x`
-  (unknowns filled with baseline), then: `y_abs = model(x) + y_baseline`. The baseline
-  computation needs `B_red_inv` which must be stored alongside the network (or recomputed from PTDF).
+- **`input_feature_filter`** rename to `fill_unknowns_with_baseline`; same signature but takes baseline array.
+- **Base-case Q storage**: `PowerFlowDataset.__init__` stores `base_q_gen[net_idx]` and
+  `base_p_gen[net_idx]` from the **first snapshot** of each network. These are the only two extra
+  per-network arrays needed (both `[N]`-shaped, cheap to store).
+- **Inference pipeline** (explicit sequence):
+  1. Load model + `ptdf_info` (B_red_inv, slack_idx, non_slack_indices) — topology-static, load once.
+  2. For each new operating point: call `compute_dc_baseline(P_inj, Q_pq, ...)` — pure numpy.
+  3. Build `x` with baseline-filled unknowns. Build PyG `Data` object (no PTDF matrix needed).
+  4. `pred_residual = model(data)` — GNN forward pass.
+  5. `pred_abs = pred_residual + y_baseline` — scalar add.
+- **`B_red_inv` serialization**: store as `.npy` file or JSON alongside saved model (in `run_info`).
 - **Notebook series**: Create new `V2.7_DataGen`, `V2.7_Training`, `V2.7_Analysis` notebooks on
-  the branch that copy/extend V2.6.x. Do NOT alter main-branch notebooks on this branch to
-  keep the diff clean.
+  the branch. Do NOT modify V2.6.x on this branch to keep the diff reviewable.
 
 ---
 
 ## Open Questions
 
-- [ ] Q: Should `weight_ptdf` parameter be kept at 0 (backward compatible) or fully removed?
-  Recommendation: keep at 0 to avoid merge conflicts, remove in a cleanup task later.
-- [ ] Q: Should the angle reference constraint in physics loss (`pred[slack, 1].mean() = 0`)
-  be relaxed since slack Vang=0 is now a KNOWN input (not a residual)? Answer: yes — slack Vang
-  residual = 0 by construction, so no angle reference loss term needed. Simplifies physics loss.
-- [ ] Q: For distributed slack (multiple slack buses), how to allocate `P_slack_DC`?
-  Recommendation: allocate proportional to `p_nom` share (same as `pnom_share` feature).
+- [ ] `weight_ptdf`: keep at 0 (backward compat) or remove? → Keep at 0 for now.
+- [ ] Angle reference loss in physics (`pred[slack,1].mean()=0`): slack Vang residual is 0 by
+  construction → term drops out naturally; no code change needed.
+- [ ] Distributed slack P allocation: use `p_nom` share (same as `pnom_share` feature).
+- [ ] **Timing**: need a benchmark cell to confirm baseline << DC PyPSA. Add to V2.7 training notebook.
 
 ---
 
 ## Recommendations
 
-1. Create branch `feature/ptdf-residual-gnn` from current `main` HEAD (`91cb06f`).
-2. New `compute_ptdf_and_dc_info(network)` in `code_base.py` returns `(ptdf_df, B_red_inv, slack_idx, non_slack_indices)`.
-3. New `compute_dc_baseline(network, snapshot, ptdf_info, base_case_data=None)` returns `y_baseline [n_buses, 4]` and baseline-filled unknown slots.
-4. Rename `input_feature_filter` → `fill_unknowns_with_baseline`; same signature but takes baseline array.
-5. Add `y_baseline` to `Data` object in `_create_graph_data`; it's fixed-size so no collate changes.
-6. In `physics_informed_loss_batch`: accept optional `use_residual_targets=False` flag; when True, look up `data.y_baseline` and reconstruct abs values.
-7. New V2.7 notebooks on branch, copying V2.6.x structure. Training notebook: set `weight_ptdf=0`.
-8. Inference helper `predict_from_dc_baseline(network, snapshot, model, ptdf_info)` to encapsulate the two-step: (1) compute baseline, (2) run GNN, (3) add baseline.
+1. ✅ Branch `feature/ptdf-residual-gnn` created from `main` HEAD (`91cb06f`).
+2. `compute_ptdf_and_dc_info(network)` → returns `(ptdf_df, B_red_inv, slack_idx, non_slack_indices)`.
+   Refactor existing `compute_ptdf_matrix` to expose these intermediate results.
+3. `compute_dc_baseline(P_inj, Q_pq, Vmag_known, bus_masks, B_red_inv, slack_idx, non_slack_indices, base_q_gen, base_p_gen)` — pure numpy, no PyPSA. Callable independently at inference time.
+4. `fill_unknowns_with_baseline(node_features, bus_types, y_baseline)` replaces `input_feature_filter`.
+5. Add `y_baseline [N,4]` to `Data` — batches normally through PyG (fixed size, no collate change).
+6. `physics_informed_loss_batch`: add `y_baseline` reconstruction before mismatch.
+7. New V2.7 notebooks. Training: `weight_ptdf=0`. Include baseline timing benchmark cell.
+8. Inference wrapper `predict_with_dc_baseline(ptdf_info, base_case_data, P_inj, Q_pq, Vmag_known, bus_masks, model)` that encapsulates steps 2–5 above and is independently benchmarkable.
