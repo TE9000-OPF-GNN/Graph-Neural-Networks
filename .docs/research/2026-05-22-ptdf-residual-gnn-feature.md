@@ -183,6 +183,79 @@ for reconstruction during inference: `y_pred_abs = y_pred_residual + y_baseline`
 
 ---
 
+## Critical Architectural Constraint: BaselineComputer Protocol (added 2026-05-23)
+
+**Three priority rules (binding, in order):**
+1. **P1 — Inference visibility**: baseline computation must be an explicit, timed step in
+   inference — NOT reuse of precomputed stored data. The whole point is to measure real cost.
+2. **P2 — Swappability**: `BaselineComputer` must be a well-defined swappable class so it can
+   be replaced by a cheaper or more accurate method without touching GNN or training code.
+3. **P3 — Fast training if possible** — allowed ONLY when it doesn't violate P1/P2.
+   Allowed: precompute `y_baseline` during dataset build, store on `Data` object.
+   The same `BaselineComputer.compute_snapshot(...)` call path is used at both build and inference time.
+
+### `BaselineComputer` class design
+
+```python
+@dataclass
+class DCBaselineStatic:
+    """Topology-static cache for one network. Computed once per topology."""
+    B_red_inv: np.ndarray        # [N-1, N-1]
+    slack_idx: int
+    non_slack_indices: list[int]
+    base_q_gen: np.ndarray       # [N] Q_gen at nominal operating point
+    base_p_gen: np.ndarray       # [N] P_gen at nominal operating point
+    n_buses: int
+
+class DCBaselineComputer:
+    """
+    Swappable baseline computer.  Implements the BaselineComputer protocol.
+    Two-phase: build topology cache once, then call compute_snapshot per solve.
+    Can be replaced by faster/better implementation without touching GNN code.
+    """
+    def build_topology_cache(self, network) -> DCBaselineStatic:
+        """Phase 1: topology-static, O(N^2) inversion. Cheap per topology."""
+        ...
+    def compute_snapshot(
+        self,
+        P_inj, Q_pq, Vmag_slack_pv, bus_masks, static: DCBaselineStatic
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Phase 2: per-snapshot, O(N) matmul. Returns (y_baseline [N,4], x_filled [N,7])."""
+        ...
+```
+
+### Training path (P3 optimization — precompute once, not per batch):
+1. `PowerFlowDataset.__init__` calls `baseline_computer.build_topology_cache(net)` for each
+   unique network topology. Stores `List[DCBaselineStatic]`, indexed same as `Y_list`.
+   Template: mirrors the `precompute_Y_matrices` pattern in Training cell 8.
+2. `_create_graph_data` calls `baseline_computer.compute_snapshot(...)` using the cached
+   static for that network's `net_idx`. This is the **same code path as inference**.
+3. Result `y_baseline [N,4]` stored as `data.y_baseline` on each Data object (auto-batched).
+
+### Inference path (P1 — explicit timed step):
+```python
+# In evaluate_gnn_on_test_set, inside the per-snapshot loop:
+t_baseline_start = time.perf_counter()
+y_baseline_np, x_filled = baseline_computer.compute_snapshot(P_inj, Q_pq, ..., static[net_idx])
+t_baseline = time.perf_counter() - t_baseline_start   # measured separately
+
+t_solve_start = time.perf_counter()
+node_pred = model(data)                                # residual prediction
+t_solve = time.perf_counter() - t_solve_start
+
+pred_abs = node_pred + torch.from_numpy(y_baseline_np)  # reconstruction
+# t_total = t_baseline + t_solve + t_postproc
+```
+The `baseline_time_ms` must appear as a separate entry in `metrics` alongside `solve_time_ms`.
+
+### `precompute_Y_matrices` is the template
+`precompute_Y_matrices(networks, device)` in Training cell 8 returns `List[(Y_real, Y_imag)]`,
+one tuple per network. The baseline static cache follows the exact same pattern:
+`precompute_baseline_statics(networks, baseline_computer)` → `List[DCBaselineStatic]`.
+This list is passed into `PowerFlowDataset` and also stored on the model's export dict.
+
+---
+
 ## Critical Architectural Constraint: Inference-Time Modularity (added 2026-05-22)
 
 **The core motivation is speed.** The DC baseline must be computable at inference time with NO
@@ -288,25 +361,53 @@ Expected hierarchy: baseline (~0.01–0.1 ms) < PyPSA DC lpf (~2.6 ms) < AC pf (
 
 ---
 
-## Recommendations (notebook-accurate, 2026-05-23)
+## Recommendations (notebook-accurate, revised 2026-05-23 with BaselineComputer protocol)
 
 1. ✅ Branch `feature/ptdf-residual-gnn` created from `main` HEAD.
-2. **Training cell 8** — extend `compute_ptdf_matrix(network)`:
-   - Change `return PTDF` → `return PTDF, B_red_inv, slack_idx, non_slack`
-   - All existing callers use positional `[0]` or unpack — must update callers in cell 10.
-3. **New standalone function** `compute_dc_baseline(P_inj, Q_pq, Vmag_slack_pv, bus_masks, B_red_inv, slack_idx, non_slack_indices, base_case_q_gen, base_case_p_gen)` — pure numpy, no PyPSA. Add to Training cell 8 or a new shared cell.
-4. **Training cell 10** — `_create_graph_data`:
-   - Store `B_red_inv` per network: call updated `compute_ptdf_matrix` once per network (cache in a dict keyed by `net_idx`).
-   - Store base-case Q/P_gen per network from first snapshot.
-   - Replace the 6 `x_?[mask] = 0.0` lines with DC baseline fill using `compute_dc_baseline`.
-   - Change `y = torch.stack([v_mag, v_ang, p_bus, q_bus])` → `y = y_true - y_baseline` (unknown cols only).
-   - Add `data.y_baseline = y_baseline_tensor` (auto-batched, no collate change).
-5. **Training cell 11** — `compute_power_flow_residual_from_pred`:
-   - Add param `y_baseline: Optional[torch.Tensor] = None`.
-   - If provided: `pred_abs = pred + y_baseline` before assembling v_mag/v_ang/p_inj/q_inj.
-   - Pass through `physics_informed_loss_batch` → `compute_power_flow_residual_from_pred`.
-6. **Training cell 15** — inference functions:
-   - `predict_network_results_with_masks`: after `out = model(data)`, do `out = out + data.y_baseline`.
-   - Add `predict_with_dc_baseline(network, snapshot_idx, model, ptdf_cache, base_q_cache)` wrapper.
-7. **Analysis cell 14** — `evaluate_dc_baseline` stays unchanged (it's a comparator).
+
+2. **Training cell 8** — new `DCBaselineStatic` dataclass + `DCBaselineComputer` class:
+   - `build_topology_cache(network)`: calls updated `compute_ptdf_matrix`, stores `B_red_inv`,
+     `slack_idx`, `non_slack_indices`, `base_q_gen`, `base_p_gen` from first snapshot.
+   - `compute_snapshot(P_inj, Q_pq, Vmag_slack_pv, bus_masks, static)`: pure numpy, no PyPSA.
+   - `precompute_baseline_statics(networks, baseline_computer)` → `List[DCBaselineStatic]`.
+     Mirrors `precompute_Y_matrices` pattern exactly.
+   - Also extend `compute_ptdf_matrix` to return `(PTDF, B_red_inv, slack_idx, non_slack)`.
+
+3. **Training cell 10** — `PowerFlowDataset.__init__`:
+   - Accept `baseline_computer: DCBaselineComputer | None = None` param.
+   - If provided: precompute `self._baseline_statics = precompute_baseline_statics(networks, bc)`.
+   - `_create_graph_data`: call `bc.compute_snapshot(...)` using `self._baseline_statics[net_idx]`.
+   - Replace 6 `x_?[mask] = 0.0` lines with DC baseline values (same positional columns).
+   - Change `y = torch.stack([v_mag, v_ang, p_bus, q_bus])` → residual targets (unknowns only).
+   - Add `data.y_baseline = torch.tensor(y_baseline, dtype=torch.float)` (auto-batched by PyG).
+
+4. **Training cell 11** — `compute_power_flow_residual_from_pred`:
+   - Add `y_baseline: Optional[torch.Tensor] = None` param.
+   - If provided: `pred_abs = pred + y_baseline`; else `pred_abs = pred` (backward compat).
+   - `physics_informed_loss_batch` receives `y_baseline=batch.y_baseline` and passes through.
+
+5. **Training cell 14** — `train_power_flow_gnn`:
+   - Add `baseline_computer: DCBaselineComputer | None = None` param.
+   - Pass through to `PowerFlowDataset` for all splits (train/val/test).
+
+6. **Training cell 17** — `evaluate_gnn_on_test_set` (inference timing):
+   - Add `baseline_computer` param and `static_cache: List[DCBaselineStatic]` param.
+   - Inside per-snapshot loop: time `baseline_computer.compute_snapshot(...)` separately.
+   - Report `baseline_time_ms` in returned `metrics` dict.
+   - `pred_abs = node_pred + torch.from_numpy(y_baseline).to(device)` before evaluation.
+   - **Do NOT** read `data.y_baseline` from stored dataset — recompute fresh from `compute_snapshot`.
+
+7. **Analysis cell 14** — `evaluate_dc_baseline` stays unchanged (comparator for DC PyPSA).
+   The Analysis copy of `evaluate_gnn_on_test_set` needs same changes as Training cell 17.
+
 8. **Timing benchmark cell** — add to V2.7 training notebook to confirm baseline << DC lpf << AC pf.
+
+---
+
+## Open Questions (updated 2026-05-23)
+- [ ] Q baseline formula: confirm `base_q_gen` = first-snapshot Q for each generator, or nominal
+  network Q? Impacts correctness for systems with large Q swing on first snapshot.
+- [ ] `weight_ptdf`: keep at 0 (backward compat) or remove? → Keep at 0 for now.
+- [ ] `B_red_inv` serialization: store in `run_info` dict (as `.tolist()`) alongside saved model.
+- [ ] Distributed slack P allocation: use `p_nom` share (same as `pnom_share` feature).
+- [ ] **Timing benchmark**: need a benchmark cell to confirm baseline (~0.01–0.1 ms) < DC lpf (~2.6 ms).
