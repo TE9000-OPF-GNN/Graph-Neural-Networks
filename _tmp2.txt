@@ -1,0 +1,385 @@
+if self.use_pnom_share:  # [STSI100526] removed p_bal_col (redundant); GNN computes load sum internally
+            # col7: static p_nom share per gen bus (p_nom_i / ╬úp_nom)
+            # Tells the model each generator's relative capacity for slack distribution.
+            p_nom_share_col = torch.zeros(n_buses, 1)
+            p_noms = network.generators["p_nom"].values.astype(float)
+            total_p_nom = float(p_noms.sum()) if p_noms.sum() > 0 else 1.0
+            for gen_name, gen in network.generators.iterrows():
+                b = gen["bus"]
+                if b in bus_to_i:
+                    p_nom_share_col[bus_to_i[b], 0] += gen["p_nom"] / total_p_nom
+            x = torch.cat([x, p_nom_share_col], dim=1)
+
+        # ÔöÇÔöÇ Target: full post-solve state for all buses ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+        y = torch.stack([v_mag, v_ang, p_bus, q_bus], dim=1)
+
+        # ÔöÇÔöÇ Edge construction (lines + transformers) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+        edge_index_list = []
+        edge_attr_list  = []
+        forward_edge_mask = []   # True for first direction (not reverse duplicate)
+        fwd_line_idx_list  = []   # one entry per forward supervised edge
+        ptdf_edge_row_idx_list = []  # STSI 26.04.07: PTDF row index per edge for learned_edge mode
+
+        branches = []
+        #STSI260402: control which branches are included in PTDF supervision via self.ptdf_branch_mode
+        # lines always included
+        for line_name, line in network.lines.iterrows():
+            if line["bus0"] in bus_to_i and line["bus1"] in bus_to_i:
+                branches.append(
+                    (
+                        line.name,  # name (not used in PTDF but useful for debugging)
+                        line["bus0"], line["bus1"],
+                        line["r"], line["x"],
+                        line.get("b", 0.0), 1.0, "line"
+                    )
+                )
+
+        # STSI260404: BUGFIX ÔÇö transformers must ALWAYS be added as graph edges
+        # for GNN message passing, regardless of ptdf_branch_mode.
+        # ptdf_branch_mode only controls which branches are supervised by PTDF
+        # loss (via forward_edge_mask / fwd_line_idx_list), NOT graph topology.
+        # Previously gated behind `if self.ptdf_branch_mode == "all":` which
+        # silently severed the graph when mode was "lines" (the default).
+        for tr_name, tr in network.transformers.iterrows():
+            if tr["bus0"] in bus_to_i and tr["bus1"] in bus_to_i:
+                tap = tr.get("tap_ratio", 1.0)
+                tap = tap if not pd.isna(tap) else 1.0
+                branches.append(
+                    (
+                        tr.name,  # name (not used in PTDF but useful for debugging)
+                        tr["bus0"], tr["bus1"],
+                        tr["r"], tr["x"],
+                        tr.get("b", 0.0), float(tap), "trafo"
+                    )
+                )
+
+
+        for branch_idx, (name, b0, b1, r, x_val, b_val, tap, btype) in enumerate(branches):
+            i0, i1 = bus_to_i[b0], bus_to_i[b1]
+            z      = complex(r, x_val)
+            y_ser  = (1.0 / z) if abs(z) > 1e-12 else 0.0
+            g_ser, b_ser = y_ser.real, y_ser.imag
+
+            if self.use_edge_features:
+                attr = [r, x_val, b_val / 2.0, tap, g_ser, b_ser]
+            else:
+                attr = [1.0]
+
+            # Forward edge
+            edge_index_list.append([i0, i1])
+            edge_attr_list.append(attr)
+
+            # PTDF supervision: only lines (or all branches) get True in forward_edge_mask
+            is_supervised = (btype == "line") if self.ptdf_branch_mode == "lines" else True
+            forward_edge_mask.append(is_supervised)
+            if is_supervised:
+                fwd_line_idx_list.append(branch_idx)
+                ptdf_edge_row_idx_list.append(branch_idx)  # STSI 26.04.07: supervised forward edge
+            else:
+                ptdf_edge_row_idx_list.append(-1)  # STSI 26.04.07: unsupervised forward edge
+
+            # Reverse edge
+            edge_index_list.append([i1, i0])
+            edge_attr_list.append(attr)
+            forward_edge_mask.append(False)
+            ptdf_edge_row_idx_list.append(-1)  # STSI 26.04.07: reverse edge
+
+        if edge_index_list:
+            edge_index = torch.tensor(edge_index_list, dtype=torch.long).t().contiguous()
+            edge_attr  = torch.tensor(edge_attr_list,  dtype=torch.float)
+            fwd_mask   = torch.tensor(forward_edge_mask, dtype=torch.bool)
+            line_idx   = torch.tensor(fwd_line_idx_list, dtype=torch.long)
+            ptdf_edge_row_idx = torch.tensor(ptdf_edge_row_idx_list, dtype=torch.long)  # STSI 26.04.07
+        else:
+            edge_index = torch.zeros((2, 0), dtype=torch.long)
+            edge_attr  = torch.zeros((0, len(attr) if branches else 1), dtype=torch.float)
+            fwd_mask   = torch.zeros(0, dtype=torch.bool)
+            line_idx   = torch.zeros(0, dtype=torch.long)
+            ptdf_edge_row_idx = torch.zeros(0, dtype=torch.long)  # STSI 26.04.07
+
+
+        try:
+            ptdf_matrix = compute_ptdf_matrix(network)
+            y_ptdf = torch.tensor(ptdf_matrix, dtype=torch.float)
+        except Exception:
+            n_lines = len(network.lines)
+            y_ptdf = torch.zeros((n_lines, n_buses), dtype=torch.float)
+
+        # STSI260402 Assertions ÔÇö verify PTDF supervision is lines-only and consistent with y_ptdf
+        n_lines = len(network.lines)
+        assert int(fwd_mask.sum()) == n_lines, \
+            f"forward_edge_mask true count {int(fwd_mask.sum())} != n_lines {n_lines}"
+        assert y_ptdf.shape[0] == n_lines, \
+            f"y_ptdf rows {y_ptdf.shape[0]} != n_lines {n_lines}"
+
+        # ÔöÇÔöÇ Line active power flows ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+        if not network.lines_t.p0.empty:
+            y_line_p = torch.tensor(
+                network.lines_t.p0.loc[snapshot].values, dtype=torch.float
+            )
+        else:
+            y_line_p = torch.zeros(len(network.lines), dtype=torch.float)
+
+        # ÔöÇÔöÇ Assemble Data object ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+        data = Data(
+            x          = x,
+            y          = y,
+            edge_index = edge_index,
+            edge_attr  = edge_attr,
+        )
+
+        # Bus-type masks ÔÇö node-level bool tensors (critical for collate + loss)
+        data.slack_mask = slack_mask   # [n_nodes] bool
+        data.pv_mask    = pv_mask      # [n_nodes] bool
+        data.pq_mask    = pq_mask      # [n_nodes] bool
+
+        # Variable-size targets (handled specially in collate_with_ptdf)
+        data.y_ptdf      = y_ptdf
+        data.y_line_p    = y_line_p
+        data.forward_edge_mask = fwd_mask
+        data.ptdf_line_index = line_idx
+        data.ptdf_edge_row_idx = ptdf_edge_row_idx  # STSI 26.04.07: per-edge PTDF row index for learned_edge mode
+
+        # Graph-level metadata
+        data.network_idx    = torch.tensor([net_idx], dtype=torch.long)
+
+        return data
+
+def collate_with_ptdf(batch):
+    """
+    Custom collate function for variable-size PTDF matrices and per-graph attributes.
+    
+    FIX 2026-03-25: Explicitly propagate slack_mask, pv_mask, pq_mask so that
+    _masked_mse_loss and physics_informed_loss_batch receive valid mask tensors.
+    Without this, all masked losses silently return 0.
+
+    """
+    # ÔöÇÔöÇ Variable-size lists: remove before PyG batching ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    y_ptdf_list   = [data.y_ptdf   for data in batch]
+    y_line_p_list = [data.y_line_p for data in batch]
+    ptdf_line_index_list = [data.ptdf_line_index for data in batch]
+
+
+    for data in batch:
+        del data.y_ptdf
+        del data.y_line_p #STSI260402: added deletion of y_line_p to prevent PyG from trying to batch it and causing errors due to variable sizes
+        del data.ptdf_line_index
+    # ÔöÇÔöÇ PyG auto-batches all node-level tensors (x, y, edge_index, etc.) ÔöÇÔöÇÔöÇÔöÇÔöÇ
+    # slack_mask / pv_mask / pq_mask are node-level bool tensors stored on each
+    # Data object by PowerFlowDataset ÔÇö Batch.from_data_list will concat them
+    # along the node dimension automatically IF they are present.
+    # ptdf_edge_row_idx is edge-level [n_edges] long ÔÇö also auto-concatenated (STSI 26.04.07)
+    batched = Batch.from_data_list(batch)
+
+    # ÔöÇÔöÇ Restore variable-size list attributes ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    batched.y_ptdf_list   = y_ptdf_list
+    batched.y_line_p_list = y_line_p_list
+    batched.ptdf_line_index_list = ptdf_line_index_list
+
+    # Restore on originals for re-use in dataset
+    for data, y_ptdf, y_line_p, ptdf_idx in zip(batch, y_ptdf_list, y_line_p_list, ptdf_line_index_list):
+        data.y_ptdf   = y_ptdf
+        data.y_line_p = y_line_p
+        data.ptdf_line_index = ptdf_idx
+
+    # ÔöÇÔöÇ Defensive check: abort loudly if masks are missing ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    for mask_attr in ("slack_mask", "pv_mask", "pq_mask"):
+        if not hasattr(batched, mask_attr):
+            raise RuntimeError(
+                f"collate_with_ptdf: batched object missing '{mask_attr}'. "
+                f"Ensure PowerFlowDataset stores data.{mask_attr} as a node-level "
+                f"bool tensor (shape [n_nodes]) on every Data object."
+            )
+
+    return batched
+
+# training data validation
+def validate_training_data(networks: list, name: str = "dataset", n_sample: int = 2) -> bool:
+    """
+    Validate that a list of PyPSA networks is compatible with PowerFlowDataset.
+    Checks all fields accessed by _create_graph_data and compute_ptdf_matrix.
+
+    Parameters
+    ----------
+    networks : list of pypsa.Network (post-PF)
+    name     : label for print output
+    n_sample : how many networks to inspect in detail
+
+    Returns
+    -------
+    bool : True if all checks pass, False if any critical issue found
+    """
+    import numpy as np
+    import torch
+
+    issues   = []   # critical ÔÇö will break the loader
+    warnings = []   # non-critical ÔÇö may degrade training
+
+    print(f"\n{'='*60}")
+    print(f"Validating '{name}': {len(networks)} networks")
+    print(f"{'='*60}")
+
+    if len(networks) == 0:
+        print("CRITICAL: Empty network list")
+        return False
+
+    for net_idx, net in enumerate(networks[:n_sample]):
+        tag = f"[net {net_idx}]"
+        print(f"\n--- Network {net_idx} ---")
+
+        # ÔöÇÔöÇ 1. Topology ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+        n_buses  = len(net.buses)
+        n_lines  = len(net.lines)
+        n_trafos = len(net.transformers)
+        n_gens   = len(net.generators)
+        n_loads  = len(net.loads)
+        n_snaps  = len(net.snapshots)
+        print(f"  Buses={n_buses}, Lines={n_lines}, Trafos={n_trafos}, "
+              f"Gens={n_gens}, Loads={n_loads}, Snapshots={n_snaps}")
+
+        if n_buses == 0:
+            issues.append(f"{tag} No buses")
+        if n_lines + n_trafos == 0:
+            issues.append(f"{tag} No lines or transformers ÔÇö edge_index will be empty")
+        if n_snaps == 0:
+            issues.append(f"{tag} No snapshots ÔÇö dataset will be empty")
+        if n_gens == 0:
+            warnings.append(f"{tag} No generators ÔÇö bus type will default to PQ everywhere")
+
+        # ÔöÇÔöÇ 2. Required buses_t tables (read in _create_graph_data) ÔöÇÔöÇ
+        print(f"\n  buses_t tables:")
+        for tbl, attr in [("buses_t.p",       "p"),
+                           ("buses_t.q",       "q"),
+                           ("buses_t.v_mag_pu","v_mag_pu"),
+                           ("buses_t.v_ang",   "v_ang")]:
+            df = getattr(net.buses_t, attr)
+            ok = not df.empty and df.shape == (n_snaps, n_buses)
+            finite = np.isfinite(df.values).all() if ok else False
+            status = "Ô£à" if (ok and finite) else "ÔØî"
+            if not ok:
+                issues.append(f"{tag} {tbl} missing or wrong shape: {df.shape} "
+                              f"(expect {(n_snaps, n_buses)})")
+            elif not finite:
+                issues.append(f"{tag} {tbl} contains NaN/Inf")
+            print(f"    {status} {tbl}: shape={df.shape}, finite={finite}")
+
+        # ÔöÇÔöÇ 3. Voltage range sanity ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+        if not net.buses_t.v_mag_pu.empty:
+            v = net.buses_t.v_mag_pu.values.flatten()
+            v_ok = np.all((v > 0.5) & (v < 1.5))
+            status = "Ô£à" if v_ok else "ÔÜá´©Å"
+            print(f"    {status} v_mag_pu range: [{v.min():.4f}, {v.max():.4f}]")
+            if not v_ok:
+                warnings.append(f"{tag} v_mag_pu out of [0.5, 1.5]: "
+                                f"min={v.min():.4f} max={v.max():.4f}")
+
+        # ÔöÇÔöÇ 4. lines_t.p0 (used for y_line_p) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+        print(f"\n  lines_t tables:")
+        p0 = net.lines_t.p0
+        ok_p0 = not p0.empty and p0.shape == (n_snaps, n_lines)
+        finite_p0 = np.isfinite(p0.values).all() if ok_p0 else False
+        status = "Ô£à" if (ok_p0 and finite_p0) else "ÔØî"
+        if not ok_p0:
+            issues.append(f"{tag} lines_t.p0 missing or wrong shape: {p0.shape} "
+                         f"(expect {(n_snaps, n_lines)})")
+        elif not finite_p0:
+            issues.append(f"{tag} lines_t.p0 contains NaN/Inf")
+        print(f"    {status} lines_t.p0: shape={p0.shape}, finite={finite_p0}")
+
+        # ÔöÇÔöÇ 5. generators_t.p and q (used for node features) ÔöÇÔöÇÔöÇÔöÇÔöÇ
+        print(f"\n  generators_t tables:")
+        for attr in ["p", "q"]:
+            df = getattr(net.generators_t, attr)
+            ok = not df.empty
+            finite = np.isfinite(df.values).all() if ok else False
+            status = "Ô£à" if (ok and finite) else "ÔÜá´©Å"
+            if not ok:
+                warnings.append(f"{tag} generators_t.{attr} empty")
+            print(f"    {status} generators_t.{attr}: shape={df.shape}, finite={finite}")
+
+        # ÔöÇÔöÇ 6. Generator control column ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+        print(f"\n  Generator control types:")
+        if "control" not in net.generators.columns:
+            issues.append(f"{tag} net.generators missing 'control' column")
+        else:
+            ctrl_counts = net.generators["control"].value_counts().to_dict()
+            has_slack = "Slack" in ctrl_counts
+            status = "Ô£à" if has_slack else "ÔØî"
+            print(f"    {status} control types: {ctrl_counts}")
+            if not has_slack:
+                issues.append(f"{tag} No Slack generator ÔÇö bus type encoding will be wrong")
+
+        # ÔöÇÔöÇ 7. Line parameters (edge_attr: r, x, b, s_nom) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+        print(f"\n  Line parameters:")
+        for col in ["r", "x", "b", "s_nom"]:
+            present = col in net.lines.columns
+            if present:
+                vals = net.lines[col].values.astype(float)
+                finite = np.isfinite(vals).all()
+                status = "Ô£à" if finite else "ÔØî"
+                print(f"    {status} lines.{col}: min={vals.min():.5f} "
+                      f"max={vals.max():.5f}")
+                if not finite:
+                    issues.append(f"{tag} lines.{col} contains NaN/Inf")
+                if col in ["r", "x"] and (vals <= 0).any():
+                    warnings.append(f"{tag} lines.{col} has zero/negative values")
+            else:
+                issues.append(f"{tag} lines.{col} column missing")
+                print(f"    ÔØî lines.{col}: MISSING")
+
+        # ÔöÇÔöÇ 8. BusÔÇôline connectivity (bus0/bus1 in buses.index) ÔöÇÔöÇÔöÇ
+        missing_buses = set()
+        for col in ["bus0", "bus1"]:
+            missing = set(net.lines[col]) - set(net.buses.index)
+            missing_buses |= missing
+        if missing_buses:
+            issues.append(f"{tag} Lines reference buses not in buses.index: "
+                         f"{missing_buses}")
+        else:
+            print(f"\n    Ô£à All line endpoints exist in buses.index")
+
+        # ÔöÇÔöÇ 9. Simulate one graph build (catches index errors) ÔöÇÔöÇÔöÇÔöÇ
+        print(f"\n  Graph construction smoke test (snapshot 0):")
+        try:
+            snap = net.snapshots[0]
+            bus_to_idx = {b: i for i, b in enumerate(net.buses.index)}
+            edges = []
+            for _, line in net.lines.iterrows():
+                i = bus_to_idx[line.bus0]
+                j = bus_to_idx[line.bus1]
+                edges += [[i, j], [j, i]]
+            edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
+            # STSI260404: BUGFIX ÔÇö align buses_t columns to buses.index order
+            x_check = np.column_stack([
+                net.buses_t.v_mag_pu.loc[snap, list(net.buses.index)].values,
+                net.buses_t.v_ang.loc[snap, list(net.buses.index)].values,
+                net.buses_t.p.loc[snap, list(net.buses.index)].values,
+                net.buses_t.q.loc[snap, list(net.buses.index)].values,
+            ])
+            assert np.isfinite(x_check).all(), "Non-finite node features"
+            print(f"    Ô£à edge_index: {edge_index.shape}, "
+                  f"node features: {x_check.shape}, all finite")
+        except Exception as e:
+            issues.append(f"{tag} Graph construction failed: {e}")
+            print(f"    ÔØî Graph construction failed: {e}")
+
+    # ÔöÇÔöÇ Summary ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    print(f"\n{'='*60}")
+    print(f"SUMMARY for '{name}'")
+    if issues:
+        print(f"\nÔØî {len(issues)} CRITICAL issue(s):")
+        for iss in issues:
+            print(f"   ÔÇó {iss}")
+    if warnings:
+        print(f"\nÔÜá´©Å  {len(warnings)} warning(s):")
+        for w in warnings:
+            print(f"   ÔÇó {w}")
+    if not issues and not warnings:
+        print("Ô£à All checks passed ÔÇö dataset is compatible with PowerFlowDataset")
+    elif not issues:
+        print("Ô£à No critical issues ÔÇö dataset should load correctly")
+
+    print(f"{'='*60}\n")
+    return len(issues) == 0
+
+
