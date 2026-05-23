@@ -28,7 +28,24 @@ instead of zeros. Branch `feature/ptdf-residual-gnn` isolates the work.
 ### 2. `y` target — absolute AC values — Training cell 10
 - **Exact line**: `y = torch.stack([v_mag, v_ang, p_bus, q_bus], dim=1)`
 - **What it does**: Stores absolute [Vmag, Vang, P, Q] from PyPSA solved PF.
-- **Why it matters**: Must change to `y_true - y_baseline` for unknown columns; 0 for known columns.
+- **Why it matters**: Must change to `y_true - y_baseline`. Because `y_baseline` carries the **actual
+  known value** for known slots (see Finding 2b), `y_true - y_baseline = 0` for known slots naturally.
+  The residual target is therefore: non-zero only where the variable is unknown.
+
+### 2b. `y_baseline [N, 4]` carries KNOWN values for known slots — CRITICAL
+- **What it is**: `y_baseline[i, col]` = DC/Q estimate for unknown variables; **actual known value**
+  for known variables. This dual meaning is intentional and required.
+- **Full layout**:
+  | Col | PQ | PV | Slack |
+  |-----|----|----|-------|
+  | 0 Vmag | 1.0 (baseline) | Vmag_known (actual) | Vmag_known (actual) |
+  | 1 Vang | θ_dc (baseline) | θ_dc (baseline) | 0 (actual, reference) |
+  | 2 P | P_known (actual) | P_known (actual) | P_slack_DC (baseline) |
+  | 3 Q | Q_known (actual) | Q_pv_crude (baseline) | Q_slack_crude (baseline) |
+- **Why it matters**: Reconstruction `pred_abs = node_pred + y_baseline` works for **both** head modes:
+  - Unknown slot: `pred_residual + baseline_estimate = pred_abs` ✓
+  - Known slot: `0 + known_value = known_value` ✓ (critical for `with_encoder` — see Finding 9)
+  - `y_true - y_baseline = 0` for known slots ✓ (clean residual target)
 
 ### 3. `y_ptdf` is the PTDF MATRIX — Training cell 10
 - **Exact lines**:
@@ -94,6 +111,35 @@ instead of zeros. Branch `feature/ptdf-residual-gnn` isolates the work.
 - **NOT** used as input to GNN. This is a reference timing/accuracy baseline for plots.
 - **Why it matters**: This function stays unchanged. Inference uses a separate path.
 
+### 10. `head_mode="with_encoder"` is the preferred head — Training cell 11, `PowerFlowGNN`
+- **What it does**: `node_pred = torch.zeros(N, 4, ...)`, then fills ONLY unknown slots per bus type:
+  ```python
+  node_pred[pq_mask,  0:2] = pq_head(h[pq_mask])    # col0=Vmag, col1=Vang
+  node_pred[pv_mask,  1]   = pv_head(h[pv_mask])[:,0] # col1=Vang
+  node_pred[pv_mask,  3]   = pv_head(h[pv_mask])[:,1] # col3=Q
+  node_pred[slack_mask,2]  = slack_head(h[slack_mask])[:,0] # col2=P
+  node_pred[slack_mask,3]  = slack_head(h[slack_mask])[:,1] # col3=Q
+  ```
+  Output is **structurally zero for known slots** — no prediction head for those.
+  Output shape is still `[N, 4]` — same as `standard`.
+- **Why it matters for residual design**:
+  1. `with_encoder` output = `[pred_residual_for_unknowns, 0_for_knowns]`. Adding `y_baseline`
+     (which has `known_value` in known slots) reconstructs the full absolute state naturally.
+  2. `_masked_mse_loss` becomes **redundant** for `with_encoder` — the model structurally cannot
+     predict known variables, so MSE is naturally zero there without masking. The mask still
+     does no harm (it skips zero-residual entries), but could be replaced with plain `F.mse_loss`
+     for `with_encoder` without loss of correctness.
+  3. The physics loss reads known P/Q/Vmag/Vang directly from `x` (not from `pred`) — this is
+     unchanged and correct for both head modes.
+  4. `evaluate_gnn_on_test_set` (cells 17/Analysis 14) currently overrides known variables after
+     inference: `vmag_eval[pv] = x[pv, 5]` etc. With `with_encoder`, these overrides are still
+     correct (model outputs 0 there, baseline adds known value — but the explicit override in the
+     eval function ensures ground-truth inputs regardless of reconstruction path).
+- **Implication for `compute_snapshot` output** (`x_filled`): the `x_filled` returned by
+  `DCBaselineComputer.compute_snapshot` replaces unknown-slot zeros with baseline estimates.
+  For `with_encoder`, the model's node embedding still processes all 7 x-columns — the baseline
+  values in x-unknowns replace zeros as richer starting signal, improving gradient flow.
+
 ---
 
 ## DC Baseline Formulas (mathematical specification)
@@ -147,13 +193,23 @@ Bold = was 0, now DC/Q baseline.
 
 | Col | Name | Slack | PV | PQ |
 |-----|------|-------|----|----|
-| 0 | ΔVmag | Vmag_true − 1.0 | 0 | Vmag_true − 1.0 |
-| 1 | ΔVang | 0 (reference) | θ_true − θ_dc | θ_true − θ_dc |
-| 2 | ΔP | P_true − P_slack_DC | 0 | 0 |
-| 3 | ΔQ | Q_true − Q_slack_crude | Q_true − Q_pv_crude | 0 |
+| 0 | ΔVmag | 0 (known) | 0 (known) | Vmag_true − 1.0 |
+| 1 | ΔVang | 0 (known reference) | θ_true − θ_dc | θ_true − θ_dc |
+| 2 | ΔP | P_true − P_slack_DC | 0 (known) | 0 (known) |
+| 3 | ΔQ | Q_true − Q_slack_crude | Q_true − Q_pv_crude | 0 (known) |
 
-Also store `data.y_baseline [n_buses, 4]` = [Vmag_baseline, θ_baseline, P_baseline, Q_baseline]
-for reconstruction during inference: `y_pred_abs = y_pred_residual + y_baseline`.
+Also store `data.y_baseline [n_buses, 4]` = the baseline used above (see Finding 2b for exact values).
+Reconstruction: `pred_abs = node_pred + y_baseline` — works identically for both head modes.
+
+## Head-mode interaction with residual design
+
+| Head mode | Known slots in output | `_masked_mse_loss` | Reconstruction |
+|-----------|----------------------|--------------------|----------------|
+| `standard` | Predicts non-zero (noise) | **Required** to block loss on known slots | `node_pred + y_baseline`; known slots: `noise + known ≈ known` (imprecise but MSE not trained on them) |
+| `with_encoder` (preferred) | Structurally 0 by construction | Redundant but harmless | `node_pred + y_baseline`; known slots: `0 + known = known` exactly ✓ |
+
+**Preferred configuration**: `head_mode="with_encoder"` + residual targets. The known-slot
+reconstruction is exact, `_masked_mse_loss` can be simplified or kept for backward compat.
 
 ---
 
@@ -163,9 +219,11 @@ for reconstruction during inference: `y_pred_abs = y_pred_residual + y_baseline`
 |---------|----------|------|-------|
 | Inline zero-masking of unknowns | V2.6.1_Training | cell 10 | 6 `x_?[mask] = 0.0` lines → replace with DC baseline |
 | PTDF computation | V2.6.1_Training | cell 8 | Extend `compute_ptdf_matrix` to also return `B_red_inv, slack_idx, non_slack` |
-| `y` target stack | V2.6.1_Training | cell 10 | `torch.stack([v_mag, v_ang, p_bus, q_bus])` → wrap in residual subtract |
+| `y` target stack | V2.6.1_Training | cell 10 | `torch.stack([v_mag, v_ang, p_bus, q_bus])` → subtract `y_baseline`; result = 0 for known slots |
+| `y_baseline` known slots | V2.6.1_Training | cell 10 | Known slots must hold the ACTUAL known value (see Finding 2b), not just DC estimates |
 | `collate_with_ptdf` | V2.6.1_Training | cell 10 | `y_baseline` [N,4] auto-batched — no change needed |
 | Physics loss 3-tuple | V2.6.1_Training | cell 11 | Add `y_baseline` param, reconstruct abs before Y×V |
+| `with_encoder` forward | V2.6.1_Training | cell 11 | Known slots are structurally 0 in output; `pred_abs = pred + y_baseline` gives exact known values |
 | PTDF aux loss gate | V2.6.1_Training | cell 11/14 | `use_ptdf_loss=False` already default — no change |
 | DC baseline comparator | V2.6_Analysis | cell 14 | `evaluate_dc_baseline` calls `lpf()` — leave unchanged, it's a comparator |
 
