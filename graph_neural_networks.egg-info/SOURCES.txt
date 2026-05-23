@@ -1,0 +1,8 @@
+README.md
+pyproject.toml
+test_011_validation.py
+graph_neural_networks.egg-info/PKG-INFO
+graph_neural_networks.egg-info/SOURCES.txt
+graph_neural_networks.egg-info/dependency_links.txt
+graph_neural_networks.egg-info/requires.txt
+graph_neural_networks.egg-info/top_level.txt
