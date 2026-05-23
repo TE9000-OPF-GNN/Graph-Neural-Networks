@@ -111,6 +111,41 @@ instead of zeros. Branch `feature/ptdf-residual-gnn` isolates the work.
 - **NOT** used as input to GNN. This is a reference timing/accuracy baseline for plots.
 - **Why it matters**: This function stays unchanged. Inference uses a separate path.
 
+### 11. DC baseline and PTDF physics loss are independently gated — verified Training cells 8/12/14
+
+**Two entirely separate paths sharing only `compute_ptdf_matrix` as a computation source:**
+
+| | DC Baseline (new, V2.7) | PTDF Physics Loss (existing, V2.6) |
+|-|------------------------|-----------------------------------|
+| **Source fn** | `compute_ptdf_matrix` → uses `B_red_inv` | `compute_ptdf_matrix` → uses `PTDF matrix` |
+| **Stored on Data** | `data.y_baseline [N,4]` | `data.y_ptdf [n_lines, n_buses]` |
+| **Consumed by** | `_create_graph_data` fill + physics loss reconstruction | `compute_ptdf_loss_matrix` / `compute_ptdf_loss_flows` |
+| **Toggle** | Always active when `baseline_computer` provided | `physics_cfg.use_ptdf_loss` (default **False**) |
+| **Reads from batch** | `batch.y_baseline` | `batch.y_ptdf_list`, `batch.y_line_p_list` |
+| **Never reads** | `batch.y_ptdf_list` | `batch.y_baseline`, `B_red_inv` |
+
+**Verified**: `compute_ptdf_loss_matrix` reads only `batch.y_ptdf_list[g]` + GNN embeddings.
+`compute_ptdf_loss_flows` reads only `batch.y_line_p_list`, `batch.ptdf_line_index_list`,
+and `batch.x[node_mask, 3]` (P injections). Neither touches `B_red_inv` or `y_baseline`.
+
+**One subtle cross-point (not a coupling — just a V2.7 semantic change):**
+`compute_ptdf_loss_flows` builds `delta_p_g = x_g[:, 3]`. In V2.6, `x[slack, 3] = 0`
+(unknown P zeroed). In V2.7, `x[slack, 3] = P_slack_DC` (DC balance estimate).
+The flow-space PTDF loss therefore becomes slightly more physically correct in V2.7 even
+without any code change — this is a **beneficial side effect**, not a coupling issue.
+
+**Redundancy hypothesis (not yet tested):**
+- `compute_ptdf_loss_matrix`: supervises the bilinear `ptdf_W` head to match the DC sensitivity
+  matrix. This is topology-based and independent of the operating point. May retain value even
+  with DC baseline input.
+- `compute_ptdf_loss_flows`: computes `ptdf_bilinear @ P_injections` vs `true_AC_line_flows`.
+  If the model already receives `θ_dc = B_red_inv @ P_nonslack` as input (x[:,6] for non-slack),
+  the DC flow information is already encoded in x. The flow-space loss is then teaching
+  the bilinear head to reproduce something the input already implicitly contains — potentially
+  **redundant**. Hypothesis: flow-space PTDF loss adds less benefit in V2.7 than in V2.6.
+- **Safe to test**: set `use_ptdf_loss=False` (already the default) → baseline still computed,
+  all baseline paths unaffected. The PTDF loss can be re-enabled independently at any time.
+
 ### 10. `head_mode="with_encoder"` is the preferred head — Training cell 11, `PowerFlowGNN`
 - **What it does**: `node_pred = torch.zeros(N, 4, ...)`, then fills ONLY unknown slots per bus type:
   ```python
