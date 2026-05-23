@@ -67,6 +67,29 @@ instead of zeros. Branch `feature/ptdf-residual-gnn` isolates the work.
 - **Important**: Called lazily inside `_create_graph_data` (one call per graph item).
   `PowerFlowDataset.__init__` does NOT precompute/cache PTDF — no `self.ptdf_matrices`.
 
+### 4b. CRITICAL BUG: `compute_ptdf_matrix` omits transformers from B matrix (prerequisite fix)
+- **Bug**: The function only loops over `network.lines` for susceptance. Transformers are
+  completely omitted from B. For ieee9, gen buses (1,2,3) are ONLY connected via transformers
+  → B has zero rows for those buses → `B_red` is singular → `pinv` → garbage angles.
+- **Affected networks**: ieee9 (3 trafos), cigre14 (2), ieee30 (4), ieee39, ieee57, ieee118.
+- **Fix (prerequisite for V2.7)**: After the lines loop, add transformer susceptance to B:
+  ```python
+  for trafo in network.transformers.index:
+      row = network.transformers.loc[trafo]
+      x_val = float(row.get("x_pu_eff", row["x"]))
+      if x_val == 0: continue
+      b_val = 1.0 / x_val
+      from_idx = bus_to_idx[row["bus0"]]
+      to_idx = bus_to_idx[row["bus1"]]
+      B[from_idx, from_idx] += b_val
+      B[to_idx, to_idx] += b_val
+      B[from_idx, to_idx] -= b_val
+      B[to_idx, from_idx] -= b_val
+      # NOT added to incidence A — PTDF gives line flows only
+  ```
+- **Validation**: After fix, DC angles must match PyPSA `lpf()` angles.
+- **Research reference**: `.docs/research/2026-05-23-compute-ptdf-matrix-missing-transformers.md` (main branch)
+
 ### 5. `compute_power_flow_residual_from_pred` uses `pred` as absolute values — Training cell 11
 - **Signature** (current):
   ```python
@@ -474,14 +497,26 @@ Expected hierarchy: baseline (~0.01–0.1 ms) < PyPSA DC lpf (~2.6 ms) < AC pf (
    - Change `y = torch.stack([v_mag, v_ang, p_bus, q_bus])` → residual targets (unknowns only).
    - Add `data.y_baseline = torch.tensor(y_baseline, dtype=torch.float)` (auto-batched by PyG).
 
-4. **Training cell 11** — `compute_power_flow_residual_from_pred`:
-   - Add `y_baseline: Optional[torch.Tensor] = None` param.
-   - If provided: `pred_abs = pred + y_baseline`; else `pred_abs = pred` (backward compat).
-   - `physics_informed_loss_batch` receives `y_baseline=batch.y_baseline` and passes through.
+4. **Training cell 11** — `physics_informed_loss_batch` (NOT `compute_power_flow_residual_from_pred`):
+   - Add `y_baseline: Optional[torch.Tensor] = None` param to `physics_informed_loss_batch`.
+   - Inside the per-graph loop, AFTER `pred_g = pred[node_mask]` (line 430), ADD:
+     ```python
+     if y_baseline is not None:
+         pred_g = pred_g + y_baseline[node_mask]  # residual → absolute
+     ```
+   - This converts residuals to absolute BEFORE the mixed-state assembly (lines 444-461).
+   - `compute_power_flow_residual_from_pred` stays UNCHANGED — it receives `pred_g_mixed`
+     which is already absolute after the assembly.
+   - **Why not in `compute_power_flow_residual_from_pred`?** That function receives the
+     already-assembled `pred_g_mixed` (known slots overridden from x). Adding y_baseline
+     there would double-add known values.
 
 5. **Training cell 14** — `train_power_flow_gnn`:
    - Add `baseline_computer: DCBaselineComputer | None = None` param.
    - Pass through to `PowerFlowDataset` for all splits (train/val/test).
+   - Training loop: pass `y_baseline=batch.y_baseline` to `physics_informed_loss_batch`.
+   - **Validation loop** (lines 491-496): same change — pass `y_baseline=batch.y_baseline`
+     to `physics_informed_loss_batch` call in the validation section.
 
 6. **Training cell 17** — `evaluate_gnn_on_test_set` (inference timing):
    - Add `baseline_computer` param and `static_cache: List[DCBaselineStatic]` param.
@@ -489,6 +524,10 @@ Expected hierarchy: baseline (~0.01–0.1 ms) < PyPSA DC lpf (~2.6 ms) < AC pf (
    - Report `baseline_time_ms` in returned `metrics` dict.
    - `pred_abs = node_pred + torch.from_numpy(y_baseline).to(device)` before evaluation.
    - **Do NOT** read `data.y_baseline` from stored dataset — recompute fresh from `compute_snapshot`.
+   - **Ground truth reconstruction**: Since `data.y` now stores RESIDUALS, the eval function
+     must reconstruct absolute truth: `y_true_abs = data.y + data.y_baseline` at lines 116-119
+     (where `vmag_true = data.y[:, 0]` etc.). Without this, MAE/RMSE would compare absolute
+     predictions against residual targets — completely wrong.
 
 7. **Analysis cell 14** — `evaluate_dc_baseline` stays unchanged (comparator for DC PyPSA).
    The Analysis copy of `evaluate_gnn_on_test_set` needs same changes as Training cell 17.
