@@ -1,66 +1,98 @@
 # Research: PTDF-Residual GNN Feature (V2.7)
+## Source notebooks: V2.6.1_Training + V2.6_DataGen + V2.6_Analysis (verified 2026-05-23)
+## NOTE: code_base.py is an old backup — do NOT use for implementation reference.
 
 ## Goal
 Redesign the GNN so it predicts **residuals** between the true AC power flow solution and
 a cheap DC+Q baseline (PTDF angles + constant-power-factor Q estimate), rather than
 predicting absolute values. The DC baseline is passed as input for unknown variables
-instead of zeros. A new git branch `feature/ptdf-residual-gnn` will isolate the work.
+instead of zeros. Branch `feature/ptdf-residual-gnn` isolates the work.
 
 ---
 
-## Key Findings
+## Key Findings (all verified against actual notebook cells)
 
-### 1. Current `x` layout and masking — `code_base.py` line 1663 / 1745–1760
-- **Location**: `PowerFlowDataset.input_feature_filter` (line 1663) and `_create_graph_data` (line ~1745)
-- **What it does**: 7-column node features `[is_slack, is_PV, is_PQ, P, Q, Vmag, Vang]`.
-  Unknown slots are **zeroed**: PQ→Vmag/Vang=0; PV→Q/Vang=0; Slack→P/Q=0.
-- **Why it matters**: The zero-fill is what must be replaced with the DC/Q baseline.
+### 1. `x` layout and masking — Training cell 10, `_create_graph_data`
+- **What it does**: 7-column node features `[is_slack(0), is_PV(1), is_PQ(2), P(3), Q(4), Vmag(5), Vang(6)]`.
+  Unknown slots are **zeroed inline** (no separate filter function — it's just direct assignment):
+  ```python
+  x_p[slack_mask] = 0.0;  x_q[slack_mask] = 0.0   # Slack P/Q unknown
+  x_q[pv_mask]    = 0.0;  x_vang[pv_mask] = 0.0   # PV Q/Vang unknown
+  x_vmag[pq_mask] = 0.0;  x_vang[pq_mask] = 0.0   # PQ Vmag/Vang unknown
+  x = torch.stack([is_slack, is_pv, is_pq, x_p, x_q, x_vmag, x_vang], dim=1)
+  ```
+  Optional col 7: `p_nom_share` appended when `use_pnom_share=True`.
+- **Why it matters**: These six `= 0.0` lines are exactly what gets replaced with DC baseline values.
+  No separate `input_feature_filter` function exists in current notebooks.
 
-### 2. Current `y` target — absolute AC values — line ~1776
-- **Location**: `_create_graph_data`, `targets = np.column_stack([vmag, vang, p, q])`
+### 2. `y` target — absolute AC values — Training cell 10
+- **Exact line**: `y = torch.stack([v_mag, v_ang, p_bus, q_bus], dim=1)`
 - **What it does**: Stores absolute [Vmag, Vang, P, Q] from PyPSA solved PF.
-- **Why it matters**: Must change to `y_true - y_baseline` (residuals only for unknown columns; 0 for known).
+- **Why it matters**: Must change to `y_true - y_baseline` for unknown columns; 0 for known columns.
 
-### 3. `y_ptdf` is the PTDF MATRIX, not DC angles — line 1800
-- **Location**: `_create_graph_data`, `y_ptdf = torch.tensor(ptdf_df.values)  # [n_lines, n_buses]`
-- **What it does**: Stores the full PTDF matrix as an auxiliary training target for the bilinear PTDF head.
-- **Why it matters**: The PTDF auxiliary head (edge×node bilinear) becomes obsolete when PTDF becomes
-  an input — `weight_ptdf` should be set to 0 on the new branch. `y_ptdf` attribute can be kept
-  (still useful for line-flow auxiliary loss) but is NOT the DC angle solution.
+### 3. `y_ptdf` is the PTDF MATRIX — Training cell 10
+- **Exact lines**:
+  ```python
+  ptdf_matrix = compute_ptdf_matrix(network)      # numpy [n_lines, n_buses]
+  y_ptdf = torch.tensor(ptdf_matrix, dtype=torch.float)
+  ```
+- **What it does**: Stores the full DC PTDF matrix as auxiliary training target.
+- **Why it matters**: `y_ptdf` is NOT DC angle predictions — it is the sensitivity matrix.
+  On the new branch `physics_cfg.use_ptdf_loss=False` / `weight_ptdf=0` disables the auxiliary
+  head. `y_ptdf` stays on the Data object (harmless, may be useful for line-flow loss).
 
-### 4. DC angle computation needs `B_red_inv` — line 1522
-- **Location**: `compute_ptdf_matrix`, line 1522 (`B_red_inv = np.linalg.inv(B_red_inv)`)
-- **What it does**: Computes `B_red_inv` internally but only returns `PTDF = A_red @ B_red_inv`.
-  Does **not** return `B_red_inv`.
-- **Why it matters**: Need `theta_nonslack = B_red_inv @ P_nonslack` for the angle baseline.
-  Fix: extend function to return `(ptdf_df, B_red_inv, slack_idx, non_slack)`, or add a new
-  `compute_ptdf_and_dc_info(network)` companion.
+### 4. `compute_ptdf_matrix` discards `B_red_inv` — Training cell 8
+- **Location**: Training cell 8, function `compute_ptdf_matrix(network)`
+- **Returns**: plain numpy array `PTDF [n_lines, n_buses]`. NOT a DataFrame.
+  `B_red_inv`, `slack_idx`, `non_slack` are computed but **thrown away**.
+- **Why it matters**: DC angle baseline needs `theta_nonslack = B_red_inv @ P_nonslack`.
+  The fix is to extend return to `(PTDF, B_red_inv, slack_idx, non_slack_indices)`.
+- **Important**: Called lazily inside `_create_graph_data` (one call per graph item).
+  `PowerFlowDataset.__init__` does NOT precompute/cache PTDF — no `self.ptdf_matrices`.
 
-### 5. `physics_informed_loss_batch` uses `pred` as absolute values — line 2041
-- **Location**: `compute_power_flow_residual_from_pred` (line 2041) called via
-  `physics_informed_loss_batch` (line 2145)
-- **What it does**: Expects `pred[:, 0]=Vmag`, `pred[:, 1]=Vang`, `pred[:, 2]=P`, `pred[:, 3]=Q`
-  as **absolute** quantities to compute Y×V mismatch.
-- **Why it matters**: With residual targets, `pred` will be `Δ = y_true - y_baseline`.
-  Physics loss must reconstruct: `pred_abs = pred + y_baseline` before computing mismatch.
-  Need to pass `y_baseline` through the batch and into the residual function.
-- **Also**: line `p_inj[pq_mask] = x[pq_mask, 3]` reads known P directly from `x`.
-  In the new design `x[pq_mask, 3]` is still the known P (unchanged), so this is safe.
+### 5. `compute_power_flow_residual_from_pred` uses `pred` as absolute values — Training cell 11
+- **Signature** (current):
+  ```python
+  def compute_power_flow_residual_from_pred(pred, x, Y_matrix, network,
+      bus_masks=None, use_q_partial_mode=False, w_P=0.5, w_Q=0.5)
+  ```
+- **Returns**: 3-tuple `(physics_loss, p_res_mean, q_res_mean)` — NOT a single scalar.
+- **What it does**: Assembles absolute voltages/injections from `pred` and `x`:
+  ```python
+  v_mag[pq_mask]    = pred[pq_mask, 0]   # predicted
+  v_ang[pv_mask]    = pred[pv_mask, 1]   # predicted
+  p_inj[pq_mask]    = x[pq_mask, 3]     # KNOWN — reads from x col 3
+  q_inj[pq_mask]    = x[pq_mask, 4]     # KNOWN — reads from x col 4
+  ```
+- **Why it matters**: With residual targets `pred` = `Δ`, the physics loss needs
+  `pred_abs = pred + y_baseline` before computing Y×V mismatch.
+  The `x[pq_mask, 3/4]` reads for known P/Q are **safe and unchanged** in new design
+  (col 3 for PQ is still P_known).
 
-### 6. Existing `collate_with_ptdf` and variable-size handling — line 1846
-- **Location**: `collate_with_ptdf` (line 1846)
-- **What it does**: Strips `y_ptdf` from the Data object, batches, then re-attaches as a list.
-  Also handles `y_line_p`. Fixed-size attributes go through PyG `Batch.from_data_list`.
-- **Why it matters**: The new `y_baseline` tensor `[n_nodes, 4]` is **fixed-size-per-graph** and
-  can be batched normally by PyG (no special handling needed — same shape as `y`).
+### 6. `collate_with_ptdf` — Training cell 10
+- **What it strips** before `Batch.from_data_list`: `y_ptdf`, `y_line_p`, `ptdf_line_index`
+  (all variable-size). Restores as `batched.y_ptdf_list`, etc.
+- **What it auto-batches** (fixed node-size): `x`, `y`, `slack_mask`, `pv_mask`, `pq_mask`,
+  `edge_index`, `edge_attr`, `ptdf_edge_row_idx`, `network_idx`.
+- **Why it matters**: The new `y_baseline [n_buses, 4]` is **fixed node-size** — it will be
+  auto-batched by `Batch.from_data_list` with NO changes to `collate_with_ptdf`.
 
-### 7. PTDF bilinear head in `PowerFlowGNN` — V2.6.1 Training cell 11
-- **Location**: `PowerFlowGNN.__init__` has `self.ptdf_W = nn.Parameter(...)`; `train_power_flow_gnn`
-  has `_compute_ptdf_loss_matrix / _compute_ptdf_loss_flows`.
-- **What it does**: Learns to predict the PTDF matrix as an auxiliary signal during training.
-- **Why it matters**: This head has **no role** in the new design (PTDF is now input, not target).
-  Set `weight_ptdf=0.0` (keeps code clean, costs nothing). Optionally remove the `ptdf_W` parameter
-  entirely on the new branch.
+### 7. `PhysicsConfig` controls PTDF aux loss — Training cell 11
+- **Current defaults**: `use_ptdf_loss=False`, `weight_ptdf=0.0`
+- **What it does**: Gates the PTDF auxiliary head in training. Already off by default.
+- **Why it matters**: New branch simply leaves `use_ptdf_loss=False`. No code removal needed.
+
+### 8. `_masked_mse_loss` restricts MSE to unknowns — Training cell 14
+- The training loop uses `_masked_mse_loss(node_pred, batch.y, batch)`, NOT raw `F.mse_loss`.
+  It only penalises unknown variables per bus type (same mask logic as physics loss).
+- **Why it matters**: With residual targets `y = y_true - y_baseline`, the masked MSE
+  will correctly compare `pred_residual` to `y_residual` — **no change needed here**.
+  The mask still applies correctly because known variables have residual = 0 in y.
+
+### 9. `evaluate_dc_baseline` in Analysis cell 14 — COMPARATOR ONLY
+- Calls PyPSA `lpf()`, collects timings, returns accuracy dict.
+- **NOT** used as input to GNN. This is a reference timing/accuracy baseline for plots.
+- **Why it matters**: This function stays unchanged. Inference uses a separate path.
 
 ---
 
@@ -125,25 +157,29 @@ for reconstruction during inference: `y_pred_abs = y_pred_residual + y_baseline`
 
 ---
 
-## Patterns to Follow
+## Patterns to Follow (notebook-accurate)
 
-| Pattern | Location | Notes |
-|---------|----------|-------|
-| PTDF computation with `B_red_inv` | `code_base.py:1482` | Extract `B_red_inv` from existing function |
-| Collating fixed-size per-node tensors | `collate_with_ptdf` line 1846 | `y_baseline` batches normally through PyG |
-| Physics loss reconstruction | `compute_power_flow_residual_from_pred` line 2041 | Add `y_baseline` param, compute `pred_abs = pred + baseline` before mismatch |
-| Base-case storage pattern | `PowerFlowDataset.ptdf_matrices` line 1645 | Add `base_q_list`, `base_p_gen_list` per network |
+| Pattern | Notebook | Cell | Notes |
+|---------|----------|------|-------|
+| Inline zero-masking of unknowns | V2.6.1_Training | cell 10 | 6 `x_?[mask] = 0.0` lines → replace with DC baseline |
+| PTDF computation | V2.6.1_Training | cell 8 | Extend `compute_ptdf_matrix` to also return `B_red_inv, slack_idx, non_slack` |
+| `y` target stack | V2.6.1_Training | cell 10 | `torch.stack([v_mag, v_ang, p_bus, q_bus])` → wrap in residual subtract |
+| `collate_with_ptdf` | V2.6.1_Training | cell 10 | `y_baseline` [N,4] auto-batched — no change needed |
+| Physics loss 3-tuple | V2.6.1_Training | cell 11 | Add `y_baseline` param, reconstruct abs before Y×V |
+| PTDF aux loss gate | V2.6.1_Training | cell 11/14 | `use_ptdf_loss=False` already default — no change |
+| DC baseline comparator | V2.6_Analysis | cell 14 | `evaluate_dc_baseline` calls `lpf()` — leave unchanged, it's a comparator |
 
 ---
 
-## Key Files
+## Key Files (notebook-accurate)
 
-| File | Purpose | Changes needed |
-|------|---------|---------------|
-| `code_base.py` | Core functions | (1) extend `compute_ptdf_matrix` → return `B_red_inv`; (2) new `compute_dc_baseline`; (3) `_create_graph_data`: fill unknowns with baseline, y=residuals, add `data.y_baseline`; (4) `physics_informed_loss_batch`: reconstruct absolute values |
-| `GNN_Powerflow_V2.6_DataGen.ipynb` | Data generation | Minor: ensure base-case Q stored per network (already solved as first snapshot) |
-| `GNN_Powerflow_V2.6.1_Training.ipynb` | Training + inference | Set `weight_ptdf=0`; update inference reconstruction; update loss to pass baseline |
-| `GNN_Powerflow_V2.6_Analysis.ipynb` | Analysis | Update prediction reconstruction calls |
+| File | Scope | Changes needed |
+|------|-------|---------------|
+| `GNN_Powerflow_V2.6.1_Training.ipynb` | **Primary** | cell 8: extend `compute_ptdf_matrix`; cell 10: `_create_graph_data` (6 masked zero lines + y + Data); cell 11: `compute_power_flow_residual_from_pred` add baseline param; cell 15: inference reconstruction |
+| `GNN_Powerflow_V2.6_DataGen.ipynb` | **Minor** | Ensure base-case Q captured per network if DataGen needs to regenerate data |
+| `GNN_Powerflow_V2.6_Analysis.ipynb` | **Minor** | Inference calls: `pred_abs = pred + y_baseline`; `evaluate_dc_baseline` stays unchanged |
+
+**Note**: `code_base.py` is an old backup — changes go into the notebook cells only.
 
 ---
 
@@ -252,14 +288,25 @@ Expected hierarchy: baseline (~0.01–0.1 ms) < PyPSA DC lpf (~2.6 ms) < AC pf (
 
 ---
 
-## Recommendations
+## Recommendations (notebook-accurate, 2026-05-23)
 
-1. ✅ Branch `feature/ptdf-residual-gnn` created from `main` HEAD (`91cb06f`).
-2. `compute_ptdf_and_dc_info(network)` → returns `(ptdf_df, B_red_inv, slack_idx, non_slack_indices)`.
-   Refactor existing `compute_ptdf_matrix` to expose these intermediate results.
-3. `compute_dc_baseline(P_inj, Q_pq, Vmag_known, bus_masks, B_red_inv, slack_idx, non_slack_indices, base_q_gen, base_p_gen)` — pure numpy, no PyPSA. Callable independently at inference time.
-4. `fill_unknowns_with_baseline(node_features, bus_types, y_baseline)` replaces `input_feature_filter`.
-5. Add `y_baseline [N,4]` to `Data` — batches normally through PyG (fixed size, no collate change).
-6. `physics_informed_loss_batch`: add `y_baseline` reconstruction before mismatch.
-7. New V2.7 notebooks. Training: `weight_ptdf=0`. Include baseline timing benchmark cell.
-8. Inference wrapper `predict_with_dc_baseline(ptdf_info, base_case_data, P_inj, Q_pq, Vmag_known, bus_masks, model)` that encapsulates steps 2–5 above and is independently benchmarkable.
+1. ✅ Branch `feature/ptdf-residual-gnn` created from `main` HEAD.
+2. **Training cell 8** — extend `compute_ptdf_matrix(network)`:
+   - Change `return PTDF` → `return PTDF, B_red_inv, slack_idx, non_slack`
+   - All existing callers use positional `[0]` or unpack — must update callers in cell 10.
+3. **New standalone function** `compute_dc_baseline(P_inj, Q_pq, Vmag_slack_pv, bus_masks, B_red_inv, slack_idx, non_slack_indices, base_case_q_gen, base_case_p_gen)` — pure numpy, no PyPSA. Add to Training cell 8 or a new shared cell.
+4. **Training cell 10** — `_create_graph_data`:
+   - Store `B_red_inv` per network: call updated `compute_ptdf_matrix` once per network (cache in a dict keyed by `net_idx`).
+   - Store base-case Q/P_gen per network from first snapshot.
+   - Replace the 6 `x_?[mask] = 0.0` lines with DC baseline fill using `compute_dc_baseline`.
+   - Change `y = torch.stack([v_mag, v_ang, p_bus, q_bus])` → `y = y_true - y_baseline` (unknown cols only).
+   - Add `data.y_baseline = y_baseline_tensor` (auto-batched, no collate change).
+5. **Training cell 11** — `compute_power_flow_residual_from_pred`:
+   - Add param `y_baseline: Optional[torch.Tensor] = None`.
+   - If provided: `pred_abs = pred + y_baseline` before assembling v_mag/v_ang/p_inj/q_inj.
+   - Pass through `physics_informed_loss_batch` → `compute_power_flow_residual_from_pred`.
+6. **Training cell 15** — inference functions:
+   - `predict_network_results_with_masks`: after `out = model(data)`, do `out = out + data.y_baseline`.
+   - Add `predict_with_dc_baseline(network, snapshot_idx, model, ptdf_cache, base_q_cache)` wrapper.
+7. **Analysis cell 14** — `evaluate_dc_baseline` stays unchanged (it's a comparator).
+8. **Timing benchmark cell** — add to V2.7 training notebook to confirm baseline << DC lpf << AC pf.
