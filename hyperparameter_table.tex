@@ -1,0 +1,96 @@
+% =============================================================================
+% Hyperparameter sweep table — runs_combined_f5b (98 runs, sweeps B1–B10a, C1a–C1c)
+% Source: GNN_Powerflow_V2.7_Training.ipynb  /  GNN_Powerflow_V2.7_Analysis.ipynb
+% Generated: 2026-07-25
+% =============================================================================
+
+% Required packages: booktabs, multirow, array, xspace
+% Usage: \input{hyperparameter_table} or paste into your main .tex file.
+
+% ─── Table 1: Varied hyperparameters ────────────────────────────────────────
+\begin{table}[htbp]
+  \centering
+  \caption{Hyperparameters varied in the B-series and C1-series sweeps
+           (\textit{runs\_combined\_f5b}, $N=98$ unique runs).
+           Sweep codes B1–B10a target flow-loss curriculum design;
+           sweeps C1a–C1c target model-capacity and regularisation.}
+  \label{tab:hparam_varied}
+  \renewcommand{\arraystretch}{1.15}
+  \begin{tabular}{llll}
+    \toprule
+    \textbf{Hyperparameter} & \textbf{Notation} & \textbf{Values explored} & \textbf{Sweeps} \\
+    \midrule
+    \multicolumn{4}{l}{\textit{GNN architecture}} \\[2pt]
+    Angle prediction mode   & $m_\theta$    & \{edge\_delta, both\}         & B1, B4, C1a \\
+    Hidden dimension        & $d_h$         & \{64, 92, 128\}               & C1a–C1c \\
+    Activation function     & $\sigma$      & \{Leaky ReLU, GELU\}          & C1a–C1c \\
+    Residual connections    & —             & \{False, True\}               & C1a–C1c \\
+    Dropout                 & —             & \{False, True\}               & C1a–C1c \\
+    Dropout rate            & $p_\text{drop}$ & \{0.1, 0.2\}               & C1a–C1c \\
+    \midrule
+    \multicolumn{4}{l}{\textit{Adaptive loss fractions (target share of MSE)}} \\[2pt]
+    AC physics fraction     & $f_\text{phys}$    & \{0.05, 0.10\}           & B7, C1a, C1c \\
+    PTDF fraction           & $f_\text{ptdf}$    & \{0.10, 0.20, 0.30\}     & B2–B3, B5, C1a \\
+    DC flow, local          & $f_\text{dcL}$     & \{0.10, 0.20, 0.30\}     & B1–B3, B5–B7, C1a–C1c \\
+    DC flow, global         & $f_\text{dcG}$     & \{0.00, 0.10, 0.30\}     & B3, B6, B10, C1a, C1c \\
+    AC flow, local          & $f_\text{acL}$     & \{0.00, 0.10, 0.20, 0.30\} & B1–B2, B5–B9, C1a, C1c \\
+    AC flow, global         & $f_\text{acG}$     & \{0.00, 0.10, 0.20, 0.30\} & B4, B6, B8, B10, B10a, C1a, C1c \\
+    \midrule
+    \multicolumn{4}{l}{\textit{Activation schedule (epoch offsets, 100-epoch training)}} \\[2pt]
+    Activation ramp width   & $e_\text{ramp}$        & \{5, 10, 15\} epochs           & B5–B10, B10a, C1c \\
+    Physics activation start & $e^\text{start}_\text{phys}$  & \{60, 70, 80\}          & B1–B10, C1a–C1c \\
+    PTDF activation start   & $e^\text{start}_\text{ptdf}$  & \{40, 60\}               & B1–B10 \\
+    PTDF activation stop    & $e^\text{stop}_\text{ptdf}$   & \{65, 75, 76, 85\}       & B1–B10 \\
+    DC-local stop           & $e^\text{stop}_\text{dcL}$    & \{45, 65\}               & B1–B10 \\
+    DC-global start/stop    & $e^\text{start/stop}_\text{dcG}$ & \{None/40, None/75\}  & B3, B6, B10 \\
+    AC-local start/stop     & $e^\text{start/stop}_\text{acL}$ & \{50/None, 60/None, 70/85\} & B1–B10 \\
+    AC-global start         & $e^\text{start}_\text{acG}$   & \{None, 80\}             & B4, B6, B8, B10 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% ─── Table 2: Fixed hyperparameters ─────────────────────────────────────────
+\begin{table}[htbp]
+  \centering
+  \caption{Hyperparameters held constant across all 98 runs in
+           \textit{runs\_combined\_f5b}.}
+  \label{tab:hparam_fixed}
+  \renewcommand{\arraystretch}{1.15}
+  \begin{tabular}{lll}
+    \toprule
+    \textbf{Hyperparameter} & \textbf{Fixed value} & \textbf{Rationale} \\
+    \midrule
+    \multicolumn{3}{l}{\textit{Training protocol}} \\[2pt]
+    Batch size              & 64                        & Memory/speed trade-off \\
+    Learning rate           & $10^{-4}$                 & Adam optimiser \\
+    Training epochs         & 100                       & Fixed budget \\
+    Random seed             & 42                        & Reproducibility \\
+    Dataset size            & 1500 networks             & \textit{mixed\_1500\_w} \\
+    Bus count range         & 9–35                      & Mixed-topology training \\
+    \midrule
+    \multicolumn{3}{l}{\textit{GNN architecture}} \\[2pt]
+    Graph conv type         & GATv2                     & Gated attention \\
+    Number of layers        & 3                         & \\
+    Normalisation           & None                      & Ablated \\
+    Output head mode        & with\_encoder             & Bus-type-aware heads \\
+    $V_\text{mag}$ mode     & residual ($\hat{V} + 1$)  & Flat-pu initialisation \\
+    Global pooling          & Disabled                  & Ablated \\
+    \midrule
+    \multicolumn{3}{l}{\textit{Physics loss}} \\[2pt]
+    Loss weighting mode     & Adaptive                  & Fraction of MSE target \\
+    Physics loss variant    & Rich (full PV/slack)      & \\
+    $w_P\,/\,w_Q$           & 0.5 / 0.5                 & Equal P/Q residual \\
+    Max adaptive weight     & 100                       & For all sub-losses \\
+    Flow target             & P and Q (pq)              & \\
+    DC-local activation     & Epoch 20 (fixed start)    & \\
+    \midrule
+    \multicolumn{3}{l}{\textit{PTDF supervision}} \\[2pt]
+    PTDF mode               & Stepwise (matrix→flows)   & \\
+    PTDF changepoint        & 10 epochs                 & Relative to start \\
+    PTDF mix ratio $\alpha$ & 0.5                       & \\
+    PTDF branch scope       & All (lines + trafos)      & \\
+    Y-matrix source         & Manual (flat-pu)          & \\
+    P\_nom share feature    & Disabled                  & Ablated \\
+    \bottomrule
+  \end{tabular}
+\end{table}

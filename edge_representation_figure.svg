@@ -1,0 +1,199 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 588" font-family="Arial, Helvetica, sans-serif">
+
+  <!-- ============================================================
+       (a) Interleaved edge storage  y=6-160
+       ============================================================ -->
+  <rect x="6" y="6" width="888" height="154" rx="5" fill="#F9F9F9" stroke="#CCCCCC"/>
+  <text x="14" y="24" font-size="12" font-weight="bold" fill="#111">(a)  Interleaved bidirectional edge storage</text>
+
+  <!-- 6 boxes  y=32-72  widths=130  gaps=13  start x=14 -->
+  <!-- Box 0: Line₁ fwd  (even) -->
+  <rect x="14"  y="32" width="130" height="40" rx="3" fill="#4472C4" stroke="#2E5494"/>
+  <text x="79"  y="50" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Line&#x2081;  &#x2192;</text>
+  <text x="79"  y="65" text-anchor="middle" font-size="9"  fill="#D0E4FF">index 0  (even)</text>
+  <!-- Box 1: Line₁ rev  (odd) -->
+  <rect x="157" y="32" width="130" height="40" rx="3" fill="#BDD7EE" stroke="#9CBEE5"/>
+  <text x="222" y="50" text-anchor="middle" font-size="11" fill="#2E5494">Line&#x2081;  &#x2190;</text>
+  <text x="222" y="65" text-anchor="middle" font-size="9"  fill="#7F7F7F">index 1  (odd)</text>
+  <!-- Box 2: Line₂ fwd  (even) -->
+  <rect x="300" y="32" width="130" height="40" rx="3" fill="#4472C4" stroke="#2E5494"/>
+  <text x="365" y="50" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Line&#x2082;  &#x2192;</text>
+  <text x="365" y="65" text-anchor="middle" font-size="9"  fill="#D0E4FF">index 2  (even)</text>
+  <!-- Box 3: Line₂ rev  (odd) -->
+  <rect x="443" y="32" width="130" height="40" rx="3" fill="#BDD7EE" stroke="#9CBEE5"/>
+  <text x="508" y="50" text-anchor="middle" font-size="11" fill="#2E5494">Line&#x2082;  &#x2190;</text>
+  <text x="508" y="65" text-anchor="middle" font-size="9"  fill="#7F7F7F">index 3  (odd)</text>
+  <!-- Box 4: Trafo fwd  (even) -->
+  <rect x="586" y="32" width="130" height="40" rx="3" fill="#C55A11" stroke="#8B3F0B"/>
+  <text x="651" y="50" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Trafo  &#x2192;</text>
+  <text x="651" y="65" text-anchor="middle" font-size="9"  fill="#FDDCBF">index 4  (even)</text>
+  <!-- Box 5: Trafo rev  (odd) -->
+  <rect x="729" y="32" width="130" height="40" rx="3" fill="#F4C09A" stroke="#D98A5A"/>
+  <text x="794" y="50" text-anchor="middle" font-size="11" fill="#7A3E0A">Trafo  &#x2190;</text>
+  <text x="794" y="65" text-anchor="middle" font-size="9"  fill="#7F7F7F">index 5  (odd)</text>
+
+  <!-- [::2] correct: U-brackets under boxes 0, 2, 4 -->
+  <path d="M14,73  L14,83  L144,83  L144,73"  fill="none" stroke="#2E5494" stroke-width="1.5"/>
+  <path d="M300,73 L300,83 L430,83 L430,73"  fill="none" stroke="#2E5494" stroke-width="1.5"/>
+  <path d="M586,73 L586,83 L716,83 L716,73"  fill="none" stroke="#8B3F0B" stroke-width="1.5"/>
+  <line x1="79"  y1="83" x2="79"  y2="91" stroke="#2E5494" stroke-width="1"/>
+  <line x1="365" y1="83" x2="365" y2="91" stroke="#2E5494" stroke-width="1"/>
+  <line x1="651" y1="83" x2="651" y2="91" stroke="#8B3F0B" stroke-width="1"/>
+  <text x="360" y="103" text-anchor="middle" font-size="11" font-weight="bold" fill="#2E5494">edge[ : : 2 ]  &#x2192;  selects all E&#x209C;&#x2080;&#x2092; = 3 forward edges  &#x2713;</text>
+
+  <!-- [:2] wrong: red bracket under boxes 0+1 only -->
+  <path d="M14,110 L14,120 L287,120 L287,110" fill="none" stroke="#C00000" stroke-width="1.5"/>
+  <text x="151" y="136" text-anchor="middle" font-size="11" fill="#C00000">edge[ : 2 ]  &#x2192;  only 2 edges: 1&#xD7; fwd + 1&#xD7; rev   &#x2717;  (silent bug)</text>
+  <text x="600" y="136" font-size="10" fill="#888" font-style="italic">common [:2] vs [::2] typo &#x2014; crashes or silently mis-aligns loss targets</text>
+
+  <!-- ============================================================
+       (b) Three branch-supervision subsets  y=164-316
+       ============================================================ -->
+  <rect x="6" y="164" width="888" height="152" rx="5" fill="#F9F9F9" stroke="#CCCCCC"/>
+  <text x="14" y="182" font-size="12" font-weight="bold" fill="#111">(b)  Three branch-supervision subsets (each evaluated on forward edges after [::2])</text>
+
+  <!-- Table header -->
+  <rect x="14" y="187" width="874" height="26" rx="3" fill="#E4E4E4"/>
+  <text x="100" y="205" text-anchor="middle" font-size="11" font-weight="bold" fill="#222">Branch</text>
+  <text x="290" y="205" text-anchor="middle" font-size="11" font-weight="bold" fill="#222">Positional fwd  [::2]</text>
+  <text x="487" y="205" text-anchor="middle" font-size="11" font-weight="bold" fill="#222">forward_edge_mask</text>
+  <text x="668" y="205" text-anchor="middle" font-size="11" font-weight="bold" fill="#222">dc_flow_mask</text>
+  <text x="826" y="205" text-anchor="middle" font-size="11" font-weight="bold" fill="#222">Notes</text>
+
+  <!-- Column dividers -->
+  <line x1="175" y1="187" x2="175" y2="312" stroke="#CCCCCC" stroke-width="1"/>
+  <line x1="390" y1="187" x2="390" y2="312" stroke="#CCCCCC" stroke-width="1"/>
+  <line x1="578" y1="187" x2="578" y2="312" stroke="#CCCCCC" stroke-width="1"/>
+  <line x1="756" y1="187" x2="756" y2="312" stroke="#CCCCCC" stroke-width="1"/>
+
+  <!-- Row 1: Line -->
+  <rect x="14" y="213" width="874" height="28" fill="white"   stroke="#E8E8E8"/>
+  <text x="100" y="231" text-anchor="middle" font-size="11" font-weight="bold" fill="#2E7D32">Line</text>
+  <text x="290" y="231" text-anchor="middle" font-size="11" fill="#2E7D32">&#x2713;  always</text>
+  <text x="487" y="231" text-anchor="middle" font-size="11" fill="#2E7D32">&#x2713;  always</text>
+  <text x="668" y="231" text-anchor="middle" font-size="11" fill="#2E7D32">&#x2713;  always</text>
+  <text x="826" y="231" text-anchor="middle" font-size="10" fill="#666">All supervision applies</text>
+
+  <!-- Row 2: Transformer, mode=lines -->
+  <rect x="14" y="241" width="874" height="36" fill="#FFF7F0" stroke="#E8E8E8"/>
+  <text x="100" y="256" text-anchor="middle" font-size="11" font-weight="bold" fill="#C55A11">Transformer</text>
+  <text x="100" y="270" text-anchor="middle" font-size="9"  fill="#888">(ptdf_branch_mode=&#x201C;lines&#x201D;)</text>
+  <text x="290" y="261" text-anchor="middle" font-size="11" fill="#2E7D32">&#x2713;  graph connectivity</text>
+  <text x="487" y="257" text-anchor="middle" font-size="11" fill="#C00000">&#x2717;  not supervised</text>
+  <text x="487" y="270" text-anchor="middle" font-size="9"  fill="#888">(no stored flow target)</text>
+  <text x="668" y="261" text-anchor="middle" font-size="11" fill="#C00000">&#x2717;  always excluded</text>
+  <text x="826" y="257" text-anchor="middle" font-size="9"  fill="#666">P=&#x394;&#x3B8;/x invalid (tap&#x2260;1);</text>
+  <text x="826" y="269" text-anchor="middle" font-size="9"  fill="#666">no flow target stored</text>
+
+  <!-- Row 3: Transformer, mode=all / edge_delta -->
+  <rect x="14" y="277" width="874" height="36" fill="#FFF0E0" stroke="#E8E8E8"/>
+  <text x="100" y="292" text-anchor="middle" font-size="11" font-weight="bold" fill="#C55A11">Transformer</text>
+  <text x="100" y="306" text-anchor="middle" font-size="9"  fill="#888">(mode=&#x201C;all&#x201D; or edge_delta/both)</text>
+  <text x="290" y="297" text-anchor="middle" font-size="11" fill="#2E7D32">&#x2713;</text>
+  <text x="487" y="293" text-anchor="middle" font-size="11" fill="#2E7D32">&#x2713;  AC &#x3C0;-model correct</text>
+  <text x="487" y="306" text-anchor="middle" font-size="9"  fill="#888">(flow targets auto-appended)</text>
+  <text x="668" y="297" text-anchor="middle" font-size="11" fill="#C00000">&#x2717;  always excluded</text>
+  <text x="826" y="293" text-anchor="middle" font-size="9"  fill="#666">BFS needs all branches &#x2192;</text>
+  <text x="826" y="305" text-anchor="middle" font-size="9"  fill="#666">auto-forces mode=&#x201C;all&#x201D;</text>
+
+  <!-- ============================================================
+       (c) BFS angle reconstruction  y=320-582
+       ============================================================ -->
+  <rect x="6" y="320" width="888" height="262" rx="5" fill="#F9F9F9" stroke="#CCCCCC"/>
+  <text x="14" y="338" font-size="12" font-weight="bold" fill="#111">(c)  BFS angle reconstruction &#x2014; sign convention proof</text>
+
+  <!-- Left: spanning tree -->
+  <rect x="14" y="344" width="372" height="230" rx="4" fill="white" stroke="#E0E0E0"/>
+
+  <!-- e0: slack(130,490) to bus1(255,420), BFS forward, s=+1 -->
+  <line x1="148" y1="480" x2="240" y2="428" stroke="#4472C4" stroke-width="2"/>
+  <!-- e0 arrowhead -->
+  <polygon points="240,428 232,434 232,427" fill="#4472C4"/>
+
+  <!-- e1: bus1(255,420) to bus2(365,462), BFS forward, s=+1 -->
+  <line x1="271" y1="426" x2="349" y2="456" stroke="#4472C4" stroke-width="2"/>
+  <!-- e1 arrowhead -->
+  <polygon points="349,456 341,457 344,450" fill="#4472C4"/>
+
+  <!-- e2: stored bus3->slack, BFS backward slack->bus3, s=-1 -->
+  <line x1="145" y1="504" x2="188" y2="543" stroke="#C55A11" stroke-width="2" stroke-dasharray="5,3"/>
+  <!-- e2 arrowhead -->
+  <polygon points="188,543 181,541 185,536" fill="#C55A11"/>
+  <!-- stored direction ghost (bus3->slack): faint arrow -->
+  <line x1="194" y1="541" x2="145" y2="503" stroke="#C55A11" stroke-width="0.8" stroke-dasharray="2,4" opacity="0.35"/>
+
+  <!-- Bus circles -->
+  <circle cx="130" cy="490" r="21" fill="#4472C4" stroke="#2E5494" stroke-width="2"/>
+  <text x="130" y="487" text-anchor="middle" font-size="10" font-weight="bold" fill="white">slack</text>
+  <text x="130" y="500" text-anchor="middle" font-size="9"  fill="#BDD7EE">&#x3B8;&#x2080;=0</text>
+
+  <circle cx="255" cy="420" r="17" fill="#4472C4" stroke="#2E5494" stroke-width="2"/>
+  <text x="255" y="417" text-anchor="middle" font-size="10" font-weight="bold" fill="white">1</text>
+  <text x="255" y="430" text-anchor="middle" font-size="9"  fill="#BDD7EE">&#x3B8;&#x2081;</text>
+
+  <circle cx="365" cy="462" r="17" fill="#4472C4" stroke="#2E5494" stroke-width="2"/>
+  <text x="365" y="459" text-anchor="middle" font-size="10" font-weight="bold" fill="white">2</text>
+  <text x="365" y="472" text-anchor="middle" font-size="9"  fill="#BDD7EE">&#x3B8;&#x2082;</text>
+
+  <circle cx="200" cy="555" r="17" fill="#C55A11" stroke="#8B3F0B" stroke-width="2"/>
+  <text x="200" y="552" text-anchor="middle" font-size="10" font-weight="bold" fill="white">3</text>
+  <text x="200" y="565" text-anchor="middle" font-size="9"  fill="#FDDCBF">&#x3B8;&#x2083;</text>
+
+  <!-- Edge labels -->
+  <text x="183" y="442" text-anchor="middle" font-size="9"  fill="#4472C4">e&#x2080;: &#x394;&#x3B8;&#x2080;=&#x3B8;&#x2080;&#x2212;&#x3B8;&#x2081;</text>
+  <text x="183" y="454" text-anchor="middle" font-size="9"  fill="#2E5494" font-weight="bold">s=+1  (BFS fwd)</text>
+
+  <text x="318" y="428" text-anchor="middle" font-size="9"  fill="#4472C4">e&#x2081;: &#x394;&#x3B8;&#x2081;=&#x3B8;&#x2081;&#x2212;&#x3B8;&#x2082;</text>
+  <text x="318" y="440" text-anchor="middle" font-size="9"  fill="#2E5494" font-weight="bold">s=+1  (BFS fwd)</text>
+
+  <text x="142" y="518" text-anchor="middle" font-size="9"  fill="#C55A11">e&#x2082;: &#x394;&#x3B8;&#x2082;=&#x3B8;&#x2083;&#x2212;&#x3B8;&#x2080;</text>
+  <text x="142" y="530" text-anchor="middle" font-size="9"  fill="#8B3F0B" font-weight="bold">s=&#x2212;1  (BFS rev)</text>
+  <text x="142" y="542" text-anchor="middle" font-size="8"  fill="#AAA"  font-style="italic">stored: bus3&#x2192;slack</text>
+
+  <!-- Legend -->
+  <line x1="22" y1="356" x2="46" y2="356" stroke="#4472C4" stroke-width="2"/>
+  <polygon points="46,356 40,353 40,359" fill="#4472C4"/>
+  <text x="50" y="360" font-size="9" fill="#333">stored fwd direction / BFS forward  (s = +1)</text>
+
+  <line x1="22" y1="371" x2="46" y2="371" stroke="#C55A11" stroke-width="2" stroke-dasharray="5,3"/>
+  <polygon points="46,371 40,368 40,374" fill="#C55A11"/>
+  <text x="50" y="375" font-size="9" fill="#333">BFS traversal against stored direction  (s = &#x2212;1)</text>
+
+  <!-- Right: formula proof -->
+
+  <!-- Master formula -->
+  <rect x="394" y="344" width="488" height="36" rx="4" fill="#E8EEF8" stroke="#9CBEE5"/>
+  <text x="638" y="368" text-anchor="middle" font-size="14" font-weight="bold" fill="#2E5494">&#x3B8;_child  =  &#x3B8;_parent  &#x2212;  s&#x2091; &#xB7; &#x394;&#x3B8;&#x2091;</text>
+
+  <!-- Convention -->
+  <text x="638" y="396" text-anchor="middle" font-size="10" fill="#555">stored convention:  &#x394;&#x3B8;&#x2091;  =  &#x3B8;_src  &#x2212;  &#x3B8;_dst   (from-bus minus to-bus, always)</text>
+
+  <!-- s=+1 case box -->
+  <rect x="394" y="404" width="234" height="98" rx="4" fill="#DEEAF1" stroke="#9CBEE5"/>
+  <text x="511" y="422" text-anchor="middle" font-size="11" font-weight="bold" fill="#2E5494">s = +1  (BFS forward)</text>
+  <text x="511" y="437" text-anchor="middle" font-size="10" fill="#333">parent=src,  child=dst</text>
+  <text x="511" y="452" text-anchor="middle" font-size="10" fill="#333">&#x3B8;_dst = &#x3B8;_src &#x2212; (+1)&#xB7;(&#x3B8;_src&#x2212;&#x3B8;_dst)</text>
+  <text x="511" y="466" text-anchor="middle" font-size="10" fill="#333">      = &#x3B8;_src &#x2212; &#x3B8;_src + &#x3B8;_dst</text>
+  <text x="511" y="481" text-anchor="middle" font-size="11" font-weight="bold" fill="#2E7D32">      = &#x3B8;_dst  &#x2713;</text>
+  <text x="511" y="496" text-anchor="middle" font-size="9"  fill="#555" font-style="italic">e.g. e&#x2080;:  &#x3B8;&#x2081; = &#x3B8;&#x2080; &#x2212; (&#x3B8;&#x2080;&#x2212;&#x3B8;&#x2081;) = &#x3B8;&#x2081;</text>
+
+  <!-- s=-1 case box -->
+  <rect x="636" y="404" width="246" height="98" rx="4" fill="#FDE9D9" stroke="#F4AF7D"/>
+  <text x="759" y="422" text-anchor="middle" font-size="11" font-weight="bold" fill="#7A3E0A">s = &#x2212;1  (BFS backward)</text>
+  <text x="759" y="437" text-anchor="middle" font-size="10" fill="#333">parent=dst,  child=src</text>
+  <text x="759" y="452" text-anchor="middle" font-size="10" fill="#333">&#x3B8;_src = &#x3B8;_dst &#x2212; (&#x2212;1)&#xB7;(&#x3B8;_src&#x2212;&#x3B8;_dst)</text>
+  <text x="759" y="466" text-anchor="middle" font-size="10" fill="#333">      = &#x3B8;_dst + &#x3B8;_src &#x2212; &#x3B8;_dst</text>
+  <text x="759" y="481" text-anchor="middle" font-size="11" font-weight="bold" fill="#2E7D32">      = &#x3B8;_src  &#x2713;</text>
+  <text x="759" y="496" text-anchor="middle" font-size="9"  fill="#555" font-style="italic">e.g. e&#x2082;:  &#x3B8;&#x2083; = &#x3B8;&#x2080; + (&#x3B8;&#x2083;&#x2212;&#x3B8;&#x2080;) = &#x3B8;&#x2083;</text>
+
+  <!-- Key insight -->
+  <rect x="394" y="510" width="488" height="36" rx="4" fill="#E2EFDA" stroke="#A9D18E"/>
+  <text x="638" y="526" text-anchor="middle" font-size="11" font-weight="bold" fill="#375623">Both cases reduce to the same algebraic identity.</text>
+  <text x="638" y="541" text-anchor="middle" font-size="10" fill="#375623">Correctness is independent of power-flow direction &#x2014; &#x394;&#x3B8;&#x2091; &lt; 0 (reverse flow) is handled without special-casing.</text>
+
+  <!-- Transformer spanning-tree note -->
+  <rect x="394" y="552" width="488" height="28" rx="4" fill="#FFF2CC" stroke="#FFD966"/>
+  <text x="638" y="566" text-anchor="middle" font-size="10" fill="#7F6000" font-weight="bold">Spanning tree must include transformers.</text>
+  <text x="638" y="578" text-anchor="middle" font-size="9"  fill="#7F6000">A lines-only tree may disconnect buses reachable only via transformer &#x2192; dataset builder auto-enforces full coverage.</text>
+
+</svg>
