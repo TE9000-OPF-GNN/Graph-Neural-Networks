@@ -1,0 +1,18 @@
+% =============================================================================
+% Methodology addendum — DC baseline reactive-power reporting convention
+% Source: GNN_Powerflow_V2.7_Analysis.ipynb (DC baseline evaluation routine,
+%         timing-versus-accuracy comparison plot)
+% Generated: 2026-09-07
+% Paste this subsection into the "Baseline solvers" / "Evaluation metrics"
+% part of the methodology section; it documents only the change described in
+% methodology_traceability.md and is not a full methodology rewrite.
+% =============================================================================
+
+\subsection{Reactive-power reporting for the DC baseline}
+\label{sec:dc-baseline-reactive-reporting}
+
+The DC (linearised) power-flow baseline solves only for voltage angle and active-power balance; voltage magnitude is held fixed at $1$~p.u.\ at every bus and no reactive-power equations are solved.
+Consequently, the DC baseline has no genuine prediction for any reactive-power quantity, at either the bus or the branch level.
+To keep the reported error metrics comparable across all quantities, we adopt a single \emph{zero-guess} convention for the reactive power the DC baseline cannot compute: both the bus-level reactive-power injection error and the branch-level reactive-flow error are evaluated against an assumed value of zero.
+Earlier reporting applied this zero-guess only to the bus-level reactive-power error and left the branch-level reactive-flow error unreported; this revision applies the same convention to both quantities for consistency.
+Because a zero-guess is not an actual solver capability, DC-baseline points corresponding to reactive-power metrics are distinguished in the timing-versus-accuracy comparison figures from points representing a genuine power-flow solution (PyPower, pandapower, fast-decoupled load flow, and full AC power flow), using a distinct marker and an explicit ``zero-guess'' label, so that a reader cannot mistake the DC baseline for a method capable of estimating reactive power.
