@@ -1,0 +1,153 @@
+============================== CELL INDEX 2 ==============================
+--- canonical[2]
++++ d0[2]
+@@ -3,8 +3,8 @@
+ # Use "." to keep everything relative to the repo (default).
+ # Example: DATA_ROOT = r"C:\Users\you\OneDrive\Data_PF_GNN"
+ import os as _os
+-DATA_ROOT             = r"C:\Users\STSI\OneDrive - USN\Data_PF_GNN"                                             
+-#DATA_ROOT             = r"C:\Users\ssimo\OneDrive - USN\Data_PF_GNN"                                             
++#DATA_ROOT             = r"C:\Users\STSI\OneDrive - USN\Data_PF_GNN"                                             
++DATA_ROOT             = r"C:\Users\ssimo\OneDrive - USN\Data_PF_GNN"                                             
+ GRID_MODEL_FILES      = _os.path.join(DATA_ROOT, "grid_model_files")    # static grid CSV/RAW files
+ TRAINING_NETWORKS_DIR = _os.path.join(DATA_ROOT, "training_networks_saved")  # dataset JSONs
+ TRAINING_RESULTS_DIR  = _os.path.join(DATA_ROOT, "training_results_saved")   # sweep result JSONs/CSVs
+
+============================== CELL INDEX 13 ==============================
+--- canonical[13]
++++ d0[13]
+@@ -624,25 +624,25 @@
+     Returns: (loss_scalar, balance_mae_detached)
+     """
+     from torch_geometric.utils import scatter
+-    N = x.shape[0] # number of nodes in the graph
+-    device = delta_theta_pred.device # get the device (CPU/GPU) of the predicted delta theta tensor
+-    n_edges_total = edge_index.shape[1] # total number of edges in the graph (including both forward and reverse directions)
++    N = x.shape[0]
++    device = delta_theta_pred.device
++    n_edges_total = edge_index.shape[1]
+ 
+     # Bidirectional Δθ: forward=+Δθ at even idx, reverse=-Δθ at odd idx.
+     # Mirrors compute_physics_residual_edge_local exactly — NEVER use [:2], only [::2].
+-    delta_theta_full = torch.zeros(n_edges_total, device=device) # initialize the full delta theta tensor for all edges, including both forward and reverse directions
+-    all_fwd = torch.zeros(n_edges_total, dtype=torch.bool, device=device) # boolean mask indicating which edges are forward edges (even indices)
+-    all_fwd[::2] = True # mark even-indexed edges as forward edges
+-    delta_theta_full[all_fwd] = delta_theta_pred # assign predicted delta theta to forward edges
+-    delta_theta_full[~all_fwd] = -delta_theta_pred # assign negative predicted delta theta to reverse edges
+-
+-    src = edge_index[0] # source nodes for each edge (used for scattering edge flows to nodes)
++    delta_theta_full = torch.zeros(n_edges_total, device=device)
++    all_fwd = torch.zeros(n_edges_total, dtype=torch.bool, device=device)
++    all_fwd[::2] = True
++    delta_theta_full[all_fwd] = delta_theta_pred
++    delta_theta_full[~all_fwd] = -delta_theta_pred
++
++    src = edge_index[0]
+     x_react = edge_attr[:, 1].clamp(min=1e-8)   # reactance only, col 1 — no r/b/tap/g_ser/b_ser
+-    f_dc = delta_theta_full / x_react # compute DC flow on each edge using the full delta theta and reactance (different from global mode where node angles are used to calculate the difference)
+-    if clamp_factor is not None and s_nom is not None: # 
+-        _bound = clamp_factor * s_nom  # [STSI 220926-b]:bound f_dc by thermal-rating multiple, prevents small-x amplification. The factor is needed to clamp the DC flow within safe limits thus avoiding explosive values for small reactances and large angle differences in the early training stages
+-        f_dc = f_dc.clamp(min=-_bound, max=_bound) # clamp the DC flow within the negative and positive bounds to ensure stability
+-    p_calc_dc = scatter(f_dc, src, dim=0, dim_size=N, reduce='sum') #Scatter is used to aggregate edge flows to the corresponding source nodes, summing contributions from all connected edges
++    f_dc = delta_theta_full / x_react
++    if clamp_factor is not None and s_nom is not None:
++        _bound = clamp_factor * s_nom  # [STSI 220926-b]:bound f_dc by thermal-rating multiple, prevents small-x amplification (Finding 2)
++        f_dc = f_dc.clamp(min=-_bound, max=_bound)
++    p_calc_dc = scatter(f_dc, src, dim=0, dim_size=N, reduce='sum')
+ 
+     if bus_masks is None:
+         slack_mask = (x[:, 0] == 1.0)
+@@ -681,34 +681,33 @@
+     Returns: (loss_scalar, balance_mae_detached)
+     """
+     from torch_geometric.utils import scatter
+-    N = x.shape[0] # Get number of nodes in the graph
+-    device = theta_pred.device # Get the device of the predicted nodal angles
+-
+-    src, dst = edge_index[0], edge_index[1] #get source and destination node indices for each edge
+-    x_react = edge_attr[:, 1].clamp(min=1e-8) #get the reactance (x) for each edge, clamped to avoid division by zero for transformers
+-    f_dc = (theta_pred[src] - theta_pred[dst]) / x_react # compute the DC power flow for each edge based on nodal angle differences and edge reactance (simplified linear DC approximation)
+-    if clamp_factor is not None and s_nom is not None: 
+-        _bound = clamp_factor * s_nom  # [STSI 220926-b]:bound f_dc by thermal-rating multiple, prevents small-x amplification. The factor is needed to clamp the DC flow within safe limits thus avoiding explosive values for small reactances and large angle differences in the early training stages
+-        f_dc = f_dc.clamp(min=-_bound, max=_bound) #Clamp between the negative and positive thermal rating bounds
+-    p_calc_dc = scatter(f_dc, src, dim=0, dim_size=N, reduce='sum') # Scatter is used to aggregate the DC power flows at each node, effectively computing the net injected power at each node according to the DC approximation
+-
+-    if bus_masks is None: # If no bus masks are provided, infer them from the node features
+-        slack_mask = (x[:, 0] == 1.0) # Identify slack buses based on node features
+-        pv_mask = (x[:, 1] == 1.0)    # Identify PV buses based on node features
+-        pq_mask = (x[:, 2] == 1.0)    # Identify PQ buses based on node features
++    N = x.shape[0]
++    device = theta_pred.device
++
++    src, dst = edge_index[0], edge_index[1]
++    x_react = edge_attr[:, 1].clamp(min=1e-8)
++    f_dc = (theta_pred[src] - theta_pred[dst]) / x_react
++    if clamp_factor is not None and s_nom is not None:
++        _bound = clamp_factor * s_nom  # [STSI 220926-b]:bound f_dc by thermal-rating multiple, prevents small-x amplification (Finding 2)
++        f_dc = f_dc.clamp(min=-_bound, max=_bound)
++    p_calc_dc = scatter(f_dc, src, dim=0, dim_size=N, reduce='sum')
++
++    if bus_masks is None:
++        slack_mask = (x[:, 0] == 1.0)
++        pv_mask = (x[:, 1] == 1.0)
++        pq_mask = (x[:, 2] == 1.0)
+     else:
+-        slack_mask, pv_mask, pq_mask = bus_masks # preferably use the provided bus masks if available
+-
+-    p_inj = torch.zeros(N, device=device) # Initialize the injected power tensor for all nodes
+-    p_inj[pq_mask] = x[pq_mask, 3] # Set injected power for PQ buses from node features
+-    p_inj[pv_mask] = x[pv_mask, 3] # Set injected power for PV buses from node features
+-    _p_col = 1 if node_pred.shape[1] < 4 else 2 # Determine the column index for the predicted injected power for slack buses based on the shape of the node predictions to avoid mixing the edge_delta mode with three node features and node-mode or both mode where nodes have four features.
+-    p_inj[slack_mask] = node_pred[slack_mask, _p_col] # Set injected power for slack buses from model predictions
+-
+-    loss = F.mse_loss(p_calc_dc, p_inj) # calculate the loss based on the difference between the calculated DC power flows and the injected power at each node
+-    mae = (p_calc_dc - p_inj).abs().mean().detach() # compute the mean absolute error for diagnostic purposes
+-
+-    return loss, mae # return both the loss and the diagnostic MAE
++        slack_mask, pv_mask, pq_mask = bus_masks
++
++    p_inj = torch.zeros(N, device=device)
++    p_inj[pq_mask] = x[pq_mask, 3]
++    p_inj[pv_mask] = x[pv_mask, 3]
++    _p_col = 1 if node_pred.shape[1] < 4 else 2
++    p_inj[slack_mask] = node_pred[slack_mask, _p_col]
++
++    loss = F.mse_loss(p_calc_dc, p_inj)
++    mae = (p_calc_dc - p_inj).abs().mean().detach()
++    return loss, mae
+ 
+ 
+ def compute_flow_loss_ac_local(
+
+============================== CELL INDEX 15 ==============================
+--- canonical[15]
++++ d0[15]
+@@ -672,12 +672,12 @@
+             # ── Step 3: Combine — direct sub-loss calls with independent ramp ─ [STSI 030626]
+ 
+             # Precompute forward-only views for flow sub-functions
+-            flow_diag = {} # dictionary to store flow diagnostics
+-            eff_w_dcf_l = eff_w_dcf_g = eff_w_acf_l = eff_w_acf_g = 0.0 # effective weights for different flow components
+-            flow_loss_val = torch.tensor(0.0, device=node_pred.device)  # initialize flow loss value tensor
+-            if delta_theta_pred is not None and (scale_dcf_local > 0 or scale_dcf_global > 0 or scale_acf_local > 0 or scale_acf_global > 0): # Check that at least one relevant scale is positive
+-                _edge_index_fwd = batch.edge_index[:, ::2]  # Store the forward edges for the subgraph (every second edge) [STSI 010726]:[::2] forward edges (was [:, :2]) 
+-                _edge_attr_fwd = batch.edge_attr[::2]  # Store the forward edge attributes for the subgraph (every second edge) [STSI 010726]:[::2] (was [:2])
++            flow_diag = {}
++            eff_w_dcf_l = eff_w_dcf_g = eff_w_acf_l = eff_w_acf_g = 0.0
++            flow_loss_val = torch.tensor(0.0, device=node_pred.device)
++            if delta_theta_pred is not None and (scale_dcf_local > 0 or scale_dcf_global > 0 or scale_acf_local > 0 or scale_acf_global > 0):
++                _edge_index_fwd = batch.edge_index[:, ::2]  # [STSI 010726]:[::2] forward edges (was [:, :2])
++                _edge_attr_fwd = batch.edge_attr[::2]  # [STSI 010726]:[::2] (was [:2])
+                 _y_lp = torch.cat(batch.y_line_p_list, dim=0).to(node_pred.device)
+                 _y_lq = torch.cat(batch.y_line_q_list, dim=0).to(node_pred.device) if hasattr(batch, 'y_line_q_list') else None
+                 _line_mask = batch.forward_edge_mask[::2]  # [STSI 010726]:[::2] len E_fwd aligned (was [:2])
+
+============================== CELL INDEX 22 ==============================
+--- canonical[22]
++++ d0[22]
+@@ -1 +1,3 @@
+-networks_mixed_1500_wide=load_dataset_list(os.path.join(TRAINING_NETWORKS_DIR, "mixed_1500_w.json"))
++networks_mixed_1500_w = load_dataset_list(os.path.join(TRAINING_NETWORKS_DIR, "mixed_1500_w.json"))
++print(f"[dataset] Loaded {len(networks_mixed_1500_w)} networks from "
++      f"{os.path.join(TRAINING_NETWORKS_DIR, 'mixed_1500_w.json')}")
+

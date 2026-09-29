@@ -1,0 +1,152 @@
+=== GNN_Powerflow_V2.7_Training_d0.ipynb ===
+  0 markdown # GNN Powerflow V2.7 — Training
+  1     code import copy
+  2     code # ── Configurable paths ───────────────────────────────────────────────────────
+  3     code #test and execution toggles
+  4     code import itertools
+  5 markdown ## Data Generation Functions
+  6     code #==================save and load genrated datasets========================
+  7 markdown ## Power System Helpers
+  8     code # =============================================================================
+  9     code # =============================================================================
+ 10 markdown ## GNN Architecture
+ 11     code # =============================================================================
+ 12     code # =============================================================================
+ 13     code # =============================================================================
+ 14 markdown ## Training Loop
+ 15     code # =============================================================================
+ 16     code # =============================================================================
+ 17 markdown ## Hyperparameter Sweep Helpers
+ 18     code def evaluate_gnn_on_test_set(
+ 19     code # =============================================================================
+ 20 markdown # Training runs
+ 21 markdown ## Load Networks
+ 22     code networks_mixed_1500_w = load_dataset_list(os.path.join(TRAINING_NETWORKS_DIR, "mixed_1500_w.json"))
+ 23 markdown ## Sweep Configs
+ 24     code # ══════════════════════════════════════════════════════════════════════
+ 25 markdown ## S0 — Pure-MSE baseline (6 runs)
+ 26     code ## Hyperparameter sweep — S0: Pure-MSE baseline (no physics/PTDF/flow terms)
+
+=== GNN_Powerflow_V2.7_Training_d7.ipynb ===
+  0 markdown # GNN Powerflow V2.7 — Training
+  1     code import copy
+  2     code # ── Configurable paths ───────────────────────────────────────────────────────
+  3     code #test and execution toggles
+  4     code import itertools
+  5 markdown ## Data Generation Functions
+  6     code #==================save and load genrated datasets========================
+  7 markdown ## Power System Helpers
+  8     code # =============================================================================
+  9     code # =============================================================================
+ 10 markdown ## GNN Architecture
+ 11     code # =============================================================================
+ 12     code # =============================================================================
+ 13     code # =============================================================================
+ 14 markdown ## Training Loop
+ 15     code # =============================================================================
+ 16     code # =============================================================================
+ 17 markdown ## Hyperparameter Sweep Helpers
+ 18     code def evaluate_gnn_on_test_set(
+ 19     code # =============================================================================
+ 20 markdown # Training runs
+ 21 markdown ## Load Networks
+ 22     code networks_mixed_1500_w = load_dataset_list(os.path.join(TRAINING_NETWORKS_DIR, "mixed_1500_w.json"))
+ 23 markdown ## Sweep Configs
+ 24     code # ══════════════════════════════════════════════════════════════════════
+ 25 markdown ## S7 — Combined DC+AC curriculum + KVL/Tier-1/both-mode ablation (10 runs)
+ 26     code ## Hyperparameter sweep — S7: combined DC+AC curriculum + KVL/Tier-1/both-mode ablation
+
+=== GNN_Powerflow_V2.7_Training_dn.ipynb ===
+  0 markdown # GNN Powerflow V2.7 — Training
+  1     code import copy
+  2     code # ── Configurable paths ───────────────────────────────────────────────────────
+  3     code #test and execution toggles
+  4     code import itertools
+  5 markdown ## Data Generation Functions
+  6     code #==================save and load genrated datasets========================
+  7 markdown ## Power System Helpers
+  8     code # =============================================================================
+  9     code # =============================================================================
+ 10 markdown ## GNN Architecture
+ 11     code # =============================================================================
+ 12     code # =============================================================================
+ 13     code # =============================================================================
+ 14 markdown ## Training Loop
+ 15     code # =============================================================================
+ 16     code # =============================================================================
+ 17 markdown ## Hyperparameter Sweep Helpers
+ 18     code def evaluate_gnn_on_test_set(
+ 19     code # =============================================================================
+ 20 markdown # Training runs
+ 21 markdown ## Load Networks
+ 22     code networks_mixed_1500_w = load_dataset_list(os.path.join(TRAINING_NETWORKS_DIR, "mixed_1500_w.json"))
+ 23 markdown ## Sweep Configs
+ 24     code # ══════════════════════════════════════════════════════════════════════
+ 25 markdown ## S0 — Pure-MSE baseline (6 runs)
+ 26     code ## Hyperparameter sweep — S0: Pure-MSE baseline (no physics/PTDF/flow terms)
+ 27 markdown ## S1 — Physics-loss fraction × timing (8 runs)
+ 28     code ## Hyperparameter sweep — S1: physics-loss fraction × activation timing
+ 29 markdown ## S2 — PTDF-loss fraction × timing (12 runs)
+ 30     code ## Hyperparameter sweep — S2: PTDF-loss fraction × activation timing
+ 31 markdown ## S3 — DC-local flow-loss fraction × window (9 runs)
+ 32     code ## Hyperparameter sweep — S3: DC-local flow-loss fraction × activation window
+ 33 markdown ## S4 — DC-global flow-loss fraction × window (9 runs)
+ 34     code ## Hyperparameter sweep — S4: DC-global flow-loss fraction × activation window
+ 35 markdown ## S5 — AC-local flow-loss fraction × window (9 runs)
+ 36     code ## Hyperparameter sweep — S5: AC-local flow-loss fraction × activation window
+ 37 markdown ## S6 — AC-global flow-loss fraction × window (9 runs)
+ 38     code ## Hyperparameter sweep — S6: AC-global flow-loss fraction × activation window
+ 39 markdown ## S7 — Combined DC+AC curriculum + KVL/Tier-1/both-mode ablation (10 runs)
+ 40     code ## Hyperparameter sweep — S7: combined DC+AC curriculum + KVL/Tier-1/both-mode ablation
+ 41 markdown ## S8 — angle_mode × residual × dropout matrix (12 runs)
+ 42     code ## Hyperparameter sweep — S8: angle_mode x residual x dropout matrix
+ 43 markdown ## Combined Summary — All Sessions
+ 44     code total_runs = (len(s0_results) + len(s1_results) + len(s2_results) + len(s3_results)
+
+=== GNN_Powerflow_V2.7_Training_AllSessions.ipynb ===
+  0 markdown # GNN Powerflow V2.7 — Training
+  1     code import copy
+  2     code # ── Configurable paths ───────────────────────────────────────────────────────
+  3     code #test and execution toggles
+  4     code import itertools
+  5 markdown ## Data Generation Functions
+  6     code #==================save and load genrated datasets========================
+  7 markdown ## Power System Helpers
+  8     code # =============================================================================
+  9     code # =============================================================================
+ 10 markdown ## GNN Architecture
+ 11     code # =============================================================================
+ 12     code # =============================================================================
+ 13     code # =============================================================================
+ 14 markdown ## Training Loop
+ 15     code # =============================================================================
+ 16     code # =============================================================================
+ 17 markdown ## Hyperparameter Sweep Helpers
+ 18     code def evaluate_gnn_on_test_set(
+ 19     code # =============================================================================
+ 20 markdown # Training runs
+ 21 markdown ## Load Networks
+ 22     code networks_mixed_1500_w = load_dataset_list(os.path.join(TRAINING_NETWORKS_DIR, "mixed_1500_w.json"))
+ 23 markdown ## Sweep Configs
+ 24     code # ══════════════════════════════════════════════════════════════════════
+ 25 markdown (empty)
+ 26 markdown ## S0 — Pure-MSE baseline (6 runs)
+ 27     code ## Hyperparameter sweep — S0: Pure-MSE baseline (no physics/PTDF/flow terms)
+ 28 markdown ## S1 — Physics-loss fraction × timing (8 runs)
+ 29     code ## Hyperparameter sweep — S1: physics-loss fraction × activation timing
+ 30 markdown ## S2 — PTDF-loss fraction × timing (12 runs)
+ 31     code ## Hyperparameter sweep — S2: PTDF-loss fraction × activation timing
+ 32 markdown ## S3 — DC-local flow-loss fraction × window (9 runs)
+ 33     code ## Hyperparameter sweep — S3: DC-local flow-loss fraction × activation window
+ 34 markdown ## S4 — DC-global flow-loss fraction × window (9 runs)
+ 35     code ## Hyperparameter sweep — S4: DC-global flow-loss fraction × activation window
+ 36 markdown ## S5 — AC-local flow-loss fraction × window (9 runs)
+ 37     code ## Hyperparameter sweep — S5: AC-local flow-loss fraction × activation window
+ 38 markdown ## S6 — AC-global flow-loss fraction × window (9 runs)
+ 39     code ## Hyperparameter sweep — S6: AC-global flow-loss fraction × activation window
+ 40 markdown ## S7 — Combined DC+AC curriculum + KVL/Tier-1/both-mode ablation (10 runs)
+ 41     code ## Hyperparameter sweep — S7: combined DC+AC curriculum + KVL/Tier-1/both-mode ablation
+ 42 markdown ## S8 — angle_mode × residual × dropout matrix (12 runs)
+ 43     code ## Hyperparameter sweep — S8: angle_mode x residual x dropout matrix
+ 44 markdown ## Combined Summary — All Sessions
+ 45     code total_runs = (len(s0_results) + len(s1_results) + len(s2_results) + len(s3_results)

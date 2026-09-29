@@ -11,6 +11,7 @@ physics_comparison_results/
 grid_model_files/
 Good_run_results/
 .docs/
+run_in_parallell/From_sim_pc/
 code_base.py
 GNN_Powerflow_V2.3 - Multi_network_implementation.html
 GNN_Powerflow_V2.1.2.html

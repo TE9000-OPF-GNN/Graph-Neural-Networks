@@ -1,0 +1,35 @@
+--- session label (markdown cell 25) for each dX file ---
+GNN_Powerflow_V2.7_Training_d0.ipynb: ## S0 — Pure-MSE baseline (6 runs)
+GNN_Powerflow_V2.7_Training_d1.ipynb: ## S1 — Physics-loss fraction × timing (8 runs)
+GNN_Powerflow_V2.7_Training_d2.ipynb: ## S2 — PTDF-loss fraction × timing (12 runs)
+GNN_Powerflow_V2.7_Training_d3.ipynb: ## S3 — DC-local flow-loss fraction × window (9 runs)
+GNN_Powerflow_V2.7_Training_d4.ipynb: ## S4 — DC-global flow-loss fraction × window (9 runs)
+GNN_Powerflow_V2.7_Training_d5.ipynb: ## S5 — AC-local flow-loss fraction × window (9 runs)
+GNN_Powerflow_V2.7_Training_d6.ipynb: ## S6 — AC-global flow-loss fraction × window (9 runs)
+GNN_Powerflow_V2.7_Training_d7.ipynb: ## S7 — Combined DC+AC curriculum + KVL/Tier-1/both-mode ablation (10 runs)
+
+--- are cells [2,13,15,22] byte-identical across ALL d0..d7? ---
+cell index 2: distinct variants across d0-d7 = 1
+cell index 13: distinct variants across d0-d7 = 1
+cell index 15: distinct variants across d0-d7 = 1
+cell index 22: distinct variants across d0-d7 = 1
+
+--- dn / AllSessions cells [2,13,15,22] vs d0 same-index cells ---
+cell 2: dn==d0? True; AllSessions==d0? False
+cell 13: dn==d0? True; AllSessions==d0? True
+cell 15: dn==d0? True; AllSessions==d0? True
+cell 22: dn==d0? True; AllSessions==d0? True
+
+--- dn sweep-section cells (25..44) vs AllSessions sweep-section cells (26..45) [shifted by 1] ---
+dn tail len=20, AllSessions tail len=20
+mismatched offsets (0-based within tail): []
+
+--- does dn/AllSessions embed the SAME text as each dX unique pair (25,26)? ---
+GNN_Powerflow_V2.7_Training_d0.ipynb (S0) pair found in dn tail: True; in AllSessions tail: True
+GNN_Powerflow_V2.7_Training_d1.ipynb (S1) pair found in dn tail: True; in AllSessions tail: True
+GNN_Powerflow_V2.7_Training_d2.ipynb (S2) pair found in dn tail: True; in AllSessions tail: True
+GNN_Powerflow_V2.7_Training_d3.ipynb (S3) pair found in dn tail: True; in AllSessions tail: True
+GNN_Powerflow_V2.7_Training_d4.ipynb (S4) pair found in dn tail: True; in AllSessions tail: True
+GNN_Powerflow_V2.7_Training_d5.ipynb (S5) pair found in dn tail: True; in AllSessions tail: True
+GNN_Powerflow_V2.7_Training_d6.ipynb (S6) pair found in dn tail: True; in AllSessions tail: True
+GNN_Powerflow_V2.7_Training_d7.ipynb (S7) pair found in dn tail: True; in AllSessions tail: True

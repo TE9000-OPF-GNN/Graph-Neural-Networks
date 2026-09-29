@@ -1,0 +1,45 @@
+--- canonical sweep cells (26-35) referencing networks_mixed_1500_* ---
+  cell 26: {'networks_mixed_1500_wide'}
+  cell 27: {'networks_mixed_1500_wide'}
+  cell 28: {'networks_mixed_1500_wide'}
+  cell 29: {'networks_mixed_1500_wide'}
+  cell 30: {'networks_mixed_1500_wide'}
+  cell 31: {'networks_mixed_1500_wide'}
+  cell 32: {'networks_mixed_1500_wide'}
+  cell 33: {'networks_mixed_1500_wide'}
+  cell 34: {'networks_mixed_1500_wide'}
+  cell 35: {'networks_mixed_1500_wide'}
+
+--- per-file cell 2 (paths) active DATA_ROOT line ---
+GNN_Powerflow_V2.7_Training_AllSessions.ipynb: ['DATA_ROOT             = r"C:\\Users\\STSI\\OneDrive - USN\\Data_PF_GNN"                                             ']
+GNN_Powerflow_V2.7_Training_d0.ipynb: ['DATA_ROOT             = r"C:\\Users\\ssimo\\OneDrive - USN\\Data_PF_GNN"                                             ']
+GNN_Powerflow_V2.7_Training_d1.ipynb: ['DATA_ROOT             = r"C:\\Users\\ssimo\\OneDrive - USN\\Data_PF_GNN"                                             ']
+GNN_Powerflow_V2.7_Training_d2.ipynb: ['DATA_ROOT             = r"C:\\Users\\ssimo\\OneDrive - USN\\Data_PF_GNN"                                             ']
+GNN_Powerflow_V2.7_Training_d3.ipynb: ['DATA_ROOT             = r"C:\\Users\\ssimo\\OneDrive - USN\\Data_PF_GNN"                                             ']
+GNN_Powerflow_V2.7_Training_d4.ipynb: ['DATA_ROOT             = r"C:\\Users\\ssimo\\OneDrive - USN\\Data_PF_GNN"                                             ']
+GNN_Powerflow_V2.7_Training_d5.ipynb: ['DATA_ROOT             = r"C:\\Users\\ssimo\\OneDrive - USN\\Data_PF_GNN"                                             ']
+GNN_Powerflow_V2.7_Training_d6.ipynb: ['DATA_ROOT             = r"C:\\Users\\ssimo\\OneDrive - USN\\Data_PF_GNN"                                             ']
+GNN_Powerflow_V2.7_Training_d7.ipynb: ['DATA_ROOT             = r"C:\\Users\\ssimo\\OneDrive - USN\\Data_PF_GNN"                                             ']
+GNN_Powerflow_V2.7_Training_dn.ipynb: ['DATA_ROOT             = r"C:\\Users\\ssimo\\OneDrive - USN\\Data_PF_GNN"                                             ']
+
+--- per-file cell 22 (dataset load) full text + which var name used in unique sweep cells ---
+GNN_Powerflow_V2.7_Training_AllSessions.ipynb cell22: 'networks_mixed_1500_w = load_dataset_list(os.path.join(TRAINING_NETWORKS_DIR, "mixed_1500_w.json"))\nprint(f"[dataset] Loaded {len(networks_mixed_1500_w)} networks from "\n      f"{os.path.join(TRAINING_NETWORKS_DIR, \'mixed_1500_w.json\')}")'
+   all networks_mixed_1500_* names referenced anywhere in file: {'networks_mixed_1500_w'}
+GNN_Powerflow_V2.7_Training_d0.ipynb cell22: 'networks_mixed_1500_w = load_dataset_list(os.path.join(TRAINING_NETWORKS_DIR, "mixed_1500_w.json"))\nprint(f"[dataset] Loaded {len(networks_mixed_1500_w)} networks from "\n      f"{os.path.join(TRAINING_NETWORKS_DIR, \'mixed_1500_w.json\')}")'
+   all networks_mixed_1500_* names referenced anywhere in file: {'networks_mixed_1500_w'}
+GNN_Powerflow_V2.7_Training_d1.ipynb cell22: 'networks_mixed_1500_w = load_dataset_list(os.path.join(TRAINING_NETWORKS_DIR, "mixed_1500_w.json"))\nprint(f"[dataset] Loaded {len(networks_mixed_1500_w)} networks from "\n      f"{os.path.join(TRAINING_NETWORKS_DIR, \'mixed_1500_w.json\')}")'
+   all networks_mixed_1500_* names referenced anywhere in file: {'networks_mixed_1500_w'}
+GNN_Powerflow_V2.7_Training_d2.ipynb cell22: 'networks_mixed_1500_w = load_dataset_list(os.path.join(TRAINING_NETWORKS_DIR, "mixed_1500_w.json"))\nprint(f"[dataset] Loaded {len(networks_mixed_1500_w)} networks from "\n      f"{os.path.join(TRAINING_NETWORKS_DIR, \'mixed_1500_w.json\')}")'
+   all networks_mixed_1500_* names referenced anywhere in file: {'networks_mixed_1500_w'}
+GNN_Powerflow_V2.7_Training_d3.ipynb cell22: 'networks_mixed_1500_w = load_dataset_list(os.path.join(TRAINING_NETWORKS_DIR, "mixed_1500_w.json"))\nprint(f"[dataset] Loaded {len(networks_mixed_1500_w)} networks from "\n      f"{os.path.join(TRAINING_NETWORKS_DIR, \'mixed_1500_w.json\')}")'
+   all networks_mixed_1500_* names referenced anywhere in file: {'networks_mixed_1500_w'}
+GNN_Powerflow_V2.7_Training_d4.ipynb cell22: 'networks_mixed_1500_w = load_dataset_list(os.path.join(TRAINING_NETWORKS_DIR, "mixed_1500_w.json"))\nprint(f"[dataset] Loaded {len(networks_mixed_1500_w)} networks from "\n      f"{os.path.join(TRAINING_NETWORKS_DIR, \'mixed_1500_w.json\')}")'
+   all networks_mixed_1500_* names referenced anywhere in file: {'networks_mixed_1500_w'}
+GNN_Powerflow_V2.7_Training_d5.ipynb cell22: 'networks_mixed_1500_w = load_dataset_list(os.path.join(TRAINING_NETWORKS_DIR, "mixed_1500_w.json"))\nprint(f"[dataset] Loaded {len(networks_mixed_1500_w)} networks from "\n      f"{os.path.join(TRAINING_NETWORKS_DIR, \'mixed_1500_w.json\')}")'
+   all networks_mixed_1500_* names referenced anywhere in file: {'networks_mixed_1500_w'}
+GNN_Powerflow_V2.7_Training_d6.ipynb cell22: 'networks_mixed_1500_w = load_dataset_list(os.path.join(TRAINING_NETWORKS_DIR, "mixed_1500_w.json"))\nprint(f"[dataset] Loaded {len(networks_mixed_1500_w)} networks from "\n      f"{os.path.join(TRAINING_NETWORKS_DIR, \'mixed_1500_w.json\')}")'
+   all networks_mixed_1500_* names referenced anywhere in file: {'networks_mixed_1500_w'}
+GNN_Powerflow_V2.7_Training_d7.ipynb cell22: 'networks_mixed_1500_w = load_dataset_list(os.path.join(TRAINING_NETWORKS_DIR, "mixed_1500_w.json"))\nprint(f"[dataset] Loaded {len(networks_mixed_1500_w)} networks from "\n      f"{os.path.join(TRAINING_NETWORKS_DIR, \'mixed_1500_w.json\')}")'
+   all networks_mixed_1500_* names referenced anywhere in file: {'networks_mixed_1500_w'}
+GNN_Powerflow_V2.7_Training_dn.ipynb cell22: 'networks_mixed_1500_w = load_dataset_list(os.path.join(TRAINING_NETWORKS_DIR, "mixed_1500_w.json"))\nprint(f"[dataset] Loaded {len(networks_mixed_1500_w)} networks from "\n      f"{os.path.join(TRAINING_NETWORKS_DIR, \'mixed_1500_w.json\')}")'
+   all networks_mixed_1500_* names referenced anywhere in file: {'networks_mixed_1500_w'}
