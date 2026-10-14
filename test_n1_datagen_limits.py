@@ -65,7 +65,7 @@ def test_solve_pf_returns_pf_result_source():
 
 def test_limits_cell_present_and_never_writes_s_nom():
     cells = _load_notebook_cells()
-    assert len(cells) == 75
+    assert len(cells) >= 75  # [STSI 141026]:task 087 appends cells after 086's; guard only that 086's cells exist
     assert cells[73]["cell_type"] == "markdown"
     assert "".join(cells[73]["source"]).startswith("## N-1 Contingency Dataset Generation")
     src = "".join(cells[74]["source"])
