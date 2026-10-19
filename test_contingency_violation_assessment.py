@@ -173,9 +173,11 @@ def real(ns):
         net.lines["limit_source"] = "pytest"
         posts.append(net)
         rows.append(dict(case_id=i, status="solved", file_position=i, source_index=src,
-                         source_position=BASE_POS, system="ieee30", outage_name=name))
+                         source_position=BASE_POS, system="ieee30", outage_name=name,
+                         base_nonconverged_snapshots=[], base_sanity_failed_snapshots=[]))   # [STSI 151026]:task 093 fields
     rows.append(dict(case_id=2, status="bridge_skipped", file_position=None, source_index=src,
-                     source_position=BASE_POS, system="ieee30", outage_name="__bridge__"))
+                     source_position=BASE_POS, system="ieee30", outage_name="__bridge__",
+                     base_nonconverged_snapshots=[], base_sanity_failed_snapshots=[]))
     return dict(base=base, posts=posts, rows=pd.DataFrame(rows), base_nets={(src, BASE_POS): base}, src=src)
 
 
@@ -248,6 +250,24 @@ def test_run_violation_assessment(ns, real, s8_run):
         assert (bus_df.source_index == real["src"]).all() and (line_df.source_position == BASE_POS).all()
     assert keysets["truth"] == keysets["dc"] == keysets[key]
     assert len(keysets["truth"][0]) == n_bus and len(keysets["truth"][1]) == n_line
+
+
+def test_run_violation_assessment_drops_base_failed(ns, real):
+    # [STSI 151026]:task 093 D-C - base-failed snapshots never scored, for every predictor
+    rows = real["rows"].copy()
+    s0 = str(real["base"].snapshots[0])
+    rows["base_sanity_failed_snapshots"] = [[s0] for _ in range(len(rows))]
+    res = ns["run_violation_assessment"](real["posts"], rows, real["base_nets"], {})
+    n_bus = sum((len(n.snapshots) - 1) * len(n.buses) for n in real["posts"])
+    n_line = sum((len(n.snapshots) - 1) * len(n.lines) for n in real["posts"])
+    keysets = {}
+    for p in ("truth", "dc"):
+        bus_df, line_df = res[p]
+        assert len(bus_df) == n_bus and len(line_df) == n_line, p
+        assert s0 not in set(bus_df.snapshot.map(str)) and s0 not in set(line_df.snapshot.map(str)), p
+        keysets[p] = (set(map(tuple, bus_df[["case_id", "snapshot", "bus"]].to_numpy())),
+                      set(map(tuple, line_df[["case_id", "snapshot", "line"]].to_numpy())))
+    assert keysets["truth"] == keysets["dc"]
 
 
 def test_run_reference_timing(ns, real):

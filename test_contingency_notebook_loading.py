@@ -9,6 +9,8 @@ import json
 import os
 import sys
 
+import numpy as np   # [STSI 151026]:task 093 base-check helper tests
+import pandas as pd
 import pytest
 
 REPO = os.path.dirname(os.path.abspath(__file__))
@@ -137,10 +139,47 @@ def test_load_n1_dataset(ns, n1):
     assert len(solved) > 0
     assert len(nets) == len(solved)
     assert "rows" not in header and header["tag"] == "n1_mixed_1500_w_pytest088"
+    for f in ns["BASE_CHECK_FIELDS"]:   # [STSI 151026]:task 093 sidecar fields present
+        assert f in rows.columns and all(isinstance(v, list) for v in rows[f]), f
     for i, net in enumerate(nets):
         outage = rows.loc[rows.file_position == i, "outage_name"]
         assert len(outage) == 1
         assert outage.iloc[0] not in net.lines.index
+
+
+def _fake_n1(tmp_path, files, **fields):
+    row = dict(case_id=0, status="bridge_skipped", file_position=None, source_index="src", source_position=0,
+               system="A", outage_name="l0", **fields)
+    (tmp_path / "n1_fake.json").write_text(json.dumps({"tag": "n1_fake", "files": files}), encoding="utf-8")
+    (tmp_path / "n1_fake_meta.json").write_text(json.dumps({"tag": "n1_fake", "rows": [row]}), encoding="utf-8")
+    return str(tmp_path / "n1_fake.json")
+
+
+def test_load_n1_dataset_requires_base_fields(ns, tmp_path):
+    # [STSI 151026]:task 093 - old sidecars raise before any .nc is loaded (index lists a missing file)
+    with pytest.raises(ValueError, match="base-check"):
+        ns["load_n1_dataset"](_fake_n1(tmp_path, ["missing/x.nc"]))
+    with pytest.raises(ValueError, match="base-check"):
+        ns["load_n1_dataset"](_fake_n1(tmp_path, ["missing/x.nc"], base_nonconverged_snapshots=[],
+                                       base_sanity_failed_snapshots=None))
+    nets, header, rows = ns["load_n1_dataset"](_fake_n1(tmp_path, [], base_nonconverged_snapshots=[],
+                                                         base_sanity_failed_snapshots=["x"]))
+    assert nets == [] and header == {"tag": "n1_fake"} and len(rows) == 1
+
+
+def test_base_failed_helpers(ns):
+    row = dict(base_nonconverged_snapshots=["a"], base_sanity_failed_snapshots=["a", "b"])
+    assert ns["base_failed_snapshots"](row) == {"a", "b"}
+    snaps = np.repeat(np.asarray(pd.date_range("2025-01-01", periods=4, freq="h")), 2)
+    df = pd.DataFrame(dict(snapshot=snaps, x=range(8)))
+    bad = dict(base_nonconverged_snapshots=["2025-01-01 00:00:00"],
+               base_sanity_failed_snapshots=["2025-01-01 01:00:00"])
+    kept = ns["drop_base_failed"](df, bad)
+    assert len(kept) == 4 and list(kept.x) == [4, 5, 6, 7]
+    di = pd.DataFrame(dict(snapshot=[0, 0, 1, 2], x=range(4)))
+    kept = ns["drop_base_failed"](di, dict(base_nonconverged_snapshots=["0"], base_sanity_failed_snapshots=[]))
+    assert list(kept.snapshot) == [1, 2]
+    assert ns["drop_base_failed"](df, dict(base_nonconverged_snapshots=[], base_sanity_failed_snapshots=[])) is df
 
 
 def test_load_source_base_nets(ns, n1):

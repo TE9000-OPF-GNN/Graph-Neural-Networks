@@ -237,11 +237,13 @@ def test_no_solution_flag_table(ns):
 
 
 # ── outage summary ───────────────────────────────────────────────────────────
-def _sidecar():
+def _sidecar(bad_nc=(), bad_san=()):
     st = ["bridge_skipped", "bridge_skipped", "non_converged", "sanity_rejected", "solved", "solved", "solved"]
     return pd.DataFrame(dict(case_id=range(7), status=st, system="A", source_index="src", source_position=0,
                              nonconverged_snapshots=[[], [], ["0", "1", "2"], [], [], [], []],
-                             file_position=[None, None, None, None, 0, 1, 2]))
+                             file_position=[None, None, None, None, 0, 1, 2],
+                             base_nonconverged_snapshots=[list(bad_nc) for _ in range(7)],   # [STSI 151026]:task 093
+                             base_sanity_failed_snapshots=[list(bad_san) for _ in range(7)]))
 
 
 def test_outage_summary(ns):
@@ -255,6 +257,7 @@ def test_outage_summary(ns):
     r = s[s.system == "ALL"].iloc[0]
     assert (r.n_outages, r.n_islanding, r.n_non_converged, r.n_sanity_rejected, r.n_solved) == (7, 2, 1, 1, 3)
     assert (r.cs_solved, r.cs_islanding, r.cs_no_solution_severe) == (72, 48, 48)
+    assert r.cs_base_nonconverged_no_solution == 0 and r.cs_base_nonconverged_solved == 0   # [STSI 151026]:task 093
     assert r.share_any_violation_solved == pytest.approx(36 / 72)
     assert r.share_any_severe_solved == pytest.approx(12 / 72)
     assert r.share_any_violation_incl_no_solution == pytest.approx((36 + 48) / 120)
@@ -263,6 +266,22 @@ def test_outage_summary(ns):
     r = s_nc[s_nc.system == "ALL"].iloc[0]
     assert (r.cs_islanding, r.cs_no_solution_severe) == (48, 24)
     assert r.share_any_severe_incl_no_solution == pytest.approx((12 + 24) / 96)
+
+
+def test_outage_summary_base_failed(ns):
+    # [STSI 151026]:task 093 - snapshots "0","1" base-failed (union, not double-counted); solved labels filtered upstream
+    rows = _sidecar(bad_nc=["0"], bad_san=["0", "1"])
+    bases = {("src", 0): SimpleNamespace(snapshots=pd.RangeIndex(24))}
+    v = {4: [0.88] * 24, 5: [0.80] * 12 + [1.0] * 12, 6: [1.0] * 24}
+    bus = _bus_frame([(c, "A", t, "b0", v[c][t]) for c in (4, 5, 6) for t in range(2, 24)])
+    labels = ns["case_snapshot_labels"](bus, _empty_lines())
+    r = ns["outage_summary"](rows, labels, bases).set_index("system").loc["ALL"]
+    assert (r.cs_solved, r.cs_islanding, r.cs_no_solution_severe) == (66, 48, 44)
+    assert (r.cs_base_nonconverged_no_solution, r.cs_base_nonconverged_solved) == (4, 6)
+    assert r.share_any_violation_incl_no_solution == pytest.approx((32 + 44) / 110)
+    assert r.share_any_severe_incl_no_solution == pytest.approx((10 + 44) / 110)
+    r = ns["outage_summary"](rows, labels, bases, no_solution_statuses=("non_converged",)).set_index("system").loc["ALL"]
+    assert (r.cs_no_solution_severe, r.cs_base_nonconverged_no_solution) == (22, 2)
 
 
 # ── severity / PR-AUC / near-limit ───────────────────────────────────────────
@@ -372,7 +391,9 @@ def test_build_and_print_report(ns, capsys):
     no_sol = {"dc": no_sol["p"], "gnn": no_sol["p"], "_timing_s": {}}
     rows = pd.DataFrame(dict(case_id=[0, 1, 2, 5, 6, 7], system=["A", "A", "B", "A", "A", "B"],
                              status=["solved"] * 3 + ["non_converged", "sanity_rejected", "bridge_skipped"],
-                             source_index="src", source_position=0))
+                             source_index="src", source_position=0,
+                             base_nonconverged_snapshots=[[] for _ in range(6)],   # [STSI 151026]:task 093
+                             base_sanity_failed_snapshots=[[] for _ in range(6)]))
     bases = {("src", 0): SimpleNamespace(snapshots=pd.RangeIndex(4))}
     r = ns["build_contingency_report"](assess, no_sol, rows, bases, {}, [], {}, {})
     assert set(r) == {"outage_summary", "case_level", "element_level", "no_solution_flags", "severity_ranking",
@@ -386,6 +407,48 @@ def test_build_and_print_report(ns, capsys):
     assert i1 < i2 < io < out.index("NO-SOLUTION FLAG TABLE")
     assert ns["NO_SOLUTION_CAVEAT"] in out[i1:i2] and "any+no_solution" in out[i1:i2]
     assert out.rstrip().endswith(ns["D3_CAVEAT"])
+
+
+# [STSI 151026]:task 093 D-C - regression nets restricted to base-ok snapshots
+def _tiny_net(ns):
+    n = ns["pypsa"].Network()
+    n.set_snapshots(range(4))
+    n.add("Bus", "b")
+    return n
+
+
+def test_restrict_nets_to_base_ok(ns):
+    n = _tiny_net(ns)
+    m = n.copy()
+    rows = lambda bad: pd.DataFrame(dict(case_id=[0, 1], status=["solved", "bridge_skipped"], source_index="src",
+                                         source_position=0, file_position=[0, None],
+                                         base_nonconverged_snapshots=[[], []],
+                                         base_sanity_failed_snapshots=[list(bad), list(bad)]))
+    n1, base = ns["restrict_nets_to_base_ok"]([n], rows([]), {("src", 0): m})
+    assert len(n1) == 1 and n1[0] is n and len(base) == 1 and base[0] is m
+    n1, base = ns["restrict_nets_to_base_ok"]([n], rows(["1"]), {("src", 0): m})
+    assert [list(x.snapshots) for x in (*n1, *base)] == [[0, 2, 3], [0, 2, 3]]
+    assert n1[0] is not n and base[0] is not m
+    assert len(n.snapshots) == 4 and len(m.snapshots) == 4
+    assert ns["restrict_nets_to_base_ok"]([n], rows(["0", "1", "2", "3"]), {("src", 0): m}) == ([], [])
+
+
+def test_build_report_restricts_regression_nets(ns, monkeypatch):
+    seen = {}
+
+    def fake_reg(runs, n1_nets, base_net_list):
+        seen["n1"] = [len(n.snapshots) for n in n1_nets]
+        seen["base"] = [len(n.snapshots) for n in base_net_list]
+        return pd.DataFrame(columns=["run_key", "set", *ns["_REG_COLS"]]), {}
+
+    monkeypatch.setitem(ns, "n1_vs_base_regression", fake_reg)
+    tiny4 = _tiny_net(ns)
+    rows = pd.DataFrame(dict(case_id=[0, 1, 2], system=["A", "A", "B"], status="solved", source_index="src",
+                             source_position=0, file_position=[0, 1, 2],
+                             base_nonconverged_snapshots=[[] for _ in range(3)],
+                             base_sanity_failed_snapshots=[["3"] for _ in range(3)]))
+    ns["build_contingency_report"](_random_assess(), None, rows, {("src", 0): tiny4}, {"r": {}}, [tiny4] * 3, {}, {})
+    assert seen == {"n1": [3, 3, 3], "base": [3]}
 
 
 # ── notebook exec / driver ───────────────────────────────────────────────────

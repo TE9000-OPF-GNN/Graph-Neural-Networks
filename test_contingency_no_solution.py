@@ -240,10 +240,11 @@ def test_real_no_solution_rows(ns, n1, runs):
             b = bus_df[bus_df.case_id == row["case_id"]]
             l = line_df[line_df.case_id == row["case_id"]]
             post_lines = [n for n in base.lines.index if n != row["outage_name"]]
-            assert len(b) == len(base.snapshots) * len(base.buses), (p, row["case_id"])
-            assert len(l) == len(base.snapshots) * len(post_lines), (p, row["case_id"])
+            ok = [t for t in base.snapshots if str(t) not in ns["base_failed_snapshots"](row)]   # [STSI 151026]:task 093
+            assert len(b) == len(ok) * len(base.buses), (p, row["case_id"])
+            assert len(l) == len(ok) * len(post_lines), (p, row["case_id"])
             assert set(b.bus) == set(base.buses.index) and set(l.line) == set(post_lines)
-            assert set(b.snapshot) == set(base.snapshots) and set(l.snapshot) == set(base.snapshots)
+            assert set(b.snapshot) == set(ok) and set(l.snapshot) == set(ok)
             assert (b.status == row["status"]).all() and (l.status == row["status"]).all()
         assert np.isfinite(bus_df["vmag"].to_numpy(dtype=float)).all(), p
         assert np.isfinite(line_df.loc[line_df.rated, "loading"].to_numpy(dtype=float)).all(), p
@@ -278,3 +279,31 @@ def test_source_guard():
     assert 'NO_SOLUTION_STATUSES = ("non_converged", "sanity_rejected")' in src
     assert "assess_case(" in src
     assert "truth_state" not in src
+
+
+# [STSI 151026]:task 093 - base-failed snapshots become base_nonconverged (never scored, never severe)
+def test_fixture_bases_all_ok(ns, n1):
+    for f in ns["BASE_CHECK_FIELDS"]:
+        assert all(v == [] for v in n1["rows"][f]), f   # research R1: positions 138/468/120 converged and sane
+
+
+def test_no_solution_drops_base_failed(ns, n1):
+    statuses = ns["NO_SOLUTION_STATUSES"]
+    first = n1["rows"][n1["rows"].status.isin(statuses)].iloc[0]
+    k = (first["source_index"], int(first["source_position"]))
+    snaps = n1["bases"][k].snapshots
+    s0, s1 = str(snaps[0]), str(snaps[1])
+    rows = n1["rows"].copy()
+    of_k = [(r["source_index"], int(r["source_position"])) == k for _, r in rows.iterrows()]
+    rows["base_nonconverged_snapshots"] = [[s0] if m else [] for m in of_k]
+    rows["base_sanity_failed_snapshots"] = [[s0, s1] if m else [] for m in of_k]
+    res = ns["run_no_solution_assessment"](rows, n1["bases"], n1["header"], {})
+    bus_df = res["dc"][0]
+    for (_, row), m in zip(rows.iterrows(), of_k):
+        if row["status"] not in statuses:
+            continue
+        base = _base(n1, row)
+        b = bus_df[bus_df.case_id == row["case_id"]]
+        n_snap = len(base.snapshots) - (2 if m else 0)
+        assert len(b) == n_snap * len(base.buses), row["case_id"]
+        assert set(b.snapshot.map(str)).isdisjoint({s0, s1}) if m else len(set(b.snapshot)) == len(base.snapshots)
