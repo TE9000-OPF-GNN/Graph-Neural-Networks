@@ -5,6 +5,7 @@ commented out). Every metric is tested on synthetic, hand-built record frames (s
 dataset is needed; files are only written under pytest's tmp_path.
 """
 # [STSI 141026]:new metrics/report tests for the contingency notebook (task 090)
+import datetime as _dt  # [STSI 191026]:task 094 - fixed clock for save-folder suffix tests
 import json
 import os
 from types import SimpleNamespace
@@ -375,14 +376,45 @@ def test_n1_vs_base_regression(ns, monkeypatch):
         (30, 2, None, None, False)
 
 
-def test_save_contingency_report(ns, tmp_path):
+class _FixedDT(_dt.datetime):  # [STSI 191026]:task 094 - deterministic datetime.now() for suffix assertions
+    @classmethod
+    def now(cls, tz=None):
+        return cls(2026, 10, 19, 14, 32, 5)
+
+
+def test_save_contingency_report(ns, tmp_path, monkeypatch):  # [STSI 191026]:task 094 - existing folder no longer raises
+    monkeypatch.setitem(ns, "datetime", _FixedDT)
     r = {"a": pd.DataFrame({"x": [1, 2]}), "b": pd.DataFrame({"y": [3.0]})}
-    with pytest.raises(FileExistsError):
-        ns["save_contingency_report"](r, str(tmp_path))
     out = tmp_path / "report_new"
-    paths = ns["save_contingency_report"](r, str(out))
-    assert sorted(os.listdir(out)) == ["a.csv", "b.csv"] and len(paths) == 2
+    assert ns["save_contingency_report"](r, str(out)) == str(out)          # free absolute path: used as given
+    assert sorted(os.listdir(out)) == ["a.csv", "b.csv"]
     pd.testing.assert_frame_equal(pd.read_csv(out / "a.csv"), r["a"])
+    (tmp_path / "rep").mkdir(); (tmp_path / "rep" / "keep.txt").write_text("old")
+    got = ns["save_contingency_report"](r, str(tmp_path / "rep"))          # existing: no raise, no overwrite
+    assert got == str(tmp_path / "rep_20261019_1432")
+    assert os.listdir(tmp_path / "rep") == ["keep.txt"] and (tmp_path / "rep" / "keep.txt").read_text() == "old"
+
+
+def test_save_contingency_report_double_collision(ns, tmp_path, monkeypatch):  # [STSI 191026]:task 094
+    monkeypatch.setitem(ns, "datetime", _FixedDT)
+    r = {"a": pd.DataFrame({"x": [1]})}
+    base = tmp_path / "rep"
+    base.mkdir(); (tmp_path / "rep_20261019_1432").mkdir()
+    (tmp_path / "rep_20261019_143205_2").write_text("a file, not a folder")
+    save = ns["save_contingency_report"]
+    assert save(r, str(base)) == str(tmp_path / "rep_20261019_143205")
+    assert save(r, str(base)) == str(tmp_path / "rep_20261019_143205_3")   # _2 is taken by a file
+    assert save(r, str(base)) == str(tmp_path / "rep_20261019_143205_4")
+    assert os.listdir(base) == [] and os.listdir(tmp_path / "rep_20261019_1432") == []
+    assert (tmp_path / "rep_20261019_143205_2").read_text() == "a file, not a folder"
+
+
+def test_save_contingency_report_relative_under_results_dir(ns, tmp_path, monkeypatch):  # [STSI 191026]:task 094
+    monkeypatch.setitem(ns, "TRAINING_RESULTS_DIR", str(tmp_path / "results"))
+    cwd = tmp_path / "cwd"; cwd.mkdir(); monkeypatch.chdir(cwd)
+    got = ns["save_contingency_report"]({"a": pd.DataFrame({"x": [1]})}, "Contingency_Results_57")
+    assert got == str(tmp_path / "results" / "Contingency_Results_57")
+    assert os.listdir(got) == ["a.csv"] and os.listdir(cwd) == []
 
 
 def test_build_and_print_report(ns, capsys):

@@ -13,6 +13,7 @@ import math
 import os
 
 import numpy as np
+import pandas as pd
 import pytest
 
 REPO = os.path.dirname(os.path.abspath(__file__))
@@ -170,14 +171,16 @@ def test_sidecar_roundtrip(ns, tmp_path):
                   line_limits={"real": {"ieee9": {"Line 2": [1.0, "code"]}},
                                "synthetic": [["ieee57", "A", 1.5], ["ieee57", "B", float("nan")]]})
     base = dict(source_index="s.json", source_position=3, system="ieee30", outage_component="Line",
-                n_buses=33, n_lines_post=40, n_lines_real_rated=19, n_lines_synthetic=21)
+                n_buses=33, n_lines_post=40, n_lines_real_rated=19, n_lines_synthetic=21,
+                base_nonconverged_snapshots=[], base_sanity_failed_snapshots=["3"])   # [STSI 151026]: task 092 fields
     rows = [
         dict(base, case_id=0, status="solved", file_position=0, outage_name="L1", is_bridge=False, converged=True,
              n_iter=3, pf_error=1e-9, nonconverged_snapshots=[], sanity_reason=None),
         dict(base, case_id=1, status="bridge_skipped", file_position=None, outage_name="L2", is_bridge=True,
              converged=None, n_iter=None, pf_error=None, nonconverged_snapshots=[], sanity_reason=None),
         dict(base, case_id=2, status="non_converged", file_position=None, outage_name="L3", is_bridge=False,
-             converged=False, n_iter=100, pf_error=1e18, nonconverged_snapshots=["0", "5"], sanity_reason=None),
+             converged=False, n_iter=100, pf_error=1e18, nonconverged_snapshots=["0", "5"], sanity_reason=None,
+             base_nonconverged_snapshots=["0"], base_sanity_failed_snapshots=["0", "5"]),
         dict(base, case_id=3, status="sanity_rejected", file_position=None, outage_name="L4", is_bridge=False,
              converged=True, n_iter=4, pf_error=1e-8, nonconverged_snapshots=[], sanity_reason="ieee30: Voltages"),
     ]
@@ -289,6 +292,41 @@ def test_e2e_ieee30_rows_and_files(ns, e2e):
     nonconv = df[df.status == "non_converged"]
     assert all(len(s) > 0 for s in nonconv.nonconverged_snapshots)
     assert sum(sum(v.values()) for v in summary["counts"].values()) == len(df)
+    for f in ("base_nonconverged_snapshots", "base_sanity_failed_snapshots"):   # [STSI 151026]: task 092
+        assert f in df.columns and all(isinstance(v, list) for v in df[f]), f
+        assert all(v == [] for v in df[f]), f   # research 2026-10-15 R1: pos 138 base fully converged + sane
+    assert e2e["header"]["base_check"]["pf_resolve"] is False
+    assert e2e["header"]["base_check"]["sanity"] == dict(ns["N1_PF_ACCEPTANCE"])
+
+
+# [STSI 151026]: task 092 - per-snapshot base check (functional on injected faults + source guard)
+def test_base_snapshot_check_clean_and_injected(ns):
+    _need_source()
+    base = _load_position(ns, 120)
+    assert ns["identify_base_system"](base) == "ieee9"
+    assert ns["base_snapshot_check"](base, "ieee9") == dict(base_nonconverged_snapshots=[],
+                                                           base_sanity_failed_snapshots=[])
+    bad = base.copy()
+    snaps = list(bad.snapshots)
+    vm = bad.buses_t.v_mag_pu.copy(); vm.iloc[3, 0] = np.nan; vm.iloc[7, 0] = 1.6; bad.buses_t["v_mag_pu"] = vm
+    p0 = bad.lines_t.p0.copy(); p0.iloc[5, 0] = np.nan; bad.lines_t["p0"] = p0
+    before = bad.buses_t.v_mag_pu.copy()
+    got = ns["base_snapshot_check"](bad, "ieee9")
+    assert got["base_nonconverged_snapshots"] == [str(snaps[3]), str(snaps[5])]   # V NaN, line flow NaN
+    assert got["base_sanity_failed_snapshots"] == [str(snaps[3]), str(snaps[7])]  # NaN V, V=1.6 > 1.5; NaN p0 passes sanity
+    pd.testing.assert_frame_equal(bad.buses_t.v_mag_pu, before)
+    assert len(bad.snapshots) == 24
+
+
+def test_base_snapshot_check_source_guard():
+    fn = _func_src(_cell_source(GEN_MARKER), "base_snapshot_check")
+    lim = [l.strip() for l in fn.splitlines() if l.strip().startswith("# Limitation")]
+    assert len(lim) == 1, lim
+    assert "near-converged unfinished NR state is not detected" in lim[0]
+    for forbidden in (".pf(", ".lpf(", "solve_power_flow_with_slack("):
+        assert forbidden not in fn, forbidden
+    assert "copy(snapshots=[s])" in fn
+    assert "**N1_PF_ACCEPTANCE" in fn
 
 
 def test_e2e_header_line_limits_reproduce_attached_limits(ns, e2e):
