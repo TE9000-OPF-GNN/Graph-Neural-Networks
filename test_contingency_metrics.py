@@ -461,7 +461,30 @@ def test_build_and_print_report(ns, capsys):
     assert "contingency_induced" in out[i1:i2]
     for cav in ns["REPORT_CAVEATS"]:
         assert cav in out[ic:]
+    assert ns["FLOW_CAVEAT"] in ns["REPORT_CAVEATS"]   # [STSI 201026]:task 098 F4
     assert out.rstrip().endswith(ns["D3_CAVEAT"])
+
+
+def test_secondary_predictor_in_tables_not_in_cost(ns, monkeypatch, capsys):  # [STSI 201026]:task 098 F4
+    assess = _random_assess()
+    sec = "gnn" + ns["NODE_THETA_SUFFIX"]
+    assess[sec] = tuple(df.copy() for df in assess["gnn"])
+    monkeypatch.setitem(ns, "evaluate_gnn_on_test_set",
+                        lambda model, nets, **kw: {"vmag_mae": 0.01, "batch_solve_time_ms": 1.0, "total_time_ms": 2.0})
+    rows = pd.DataFrame(dict(case_id=[0, 1, 2], system=["A", "A", "B"], status="solved", source_index="src",
+                             source_position=0, file_position=[0, 1, 2],
+                             base_nonconverged_snapshots=[[] for _ in range(3)],
+                             base_sanity_failed_snapshots=[[] for _ in range(3)]))
+    bases = {("src", 0): SimpleNamespace(snapshots=pd.RangeIndex(4))}
+    r = ns["build_contingency_report"](assess, None, rows, bases, {"gnn": {"model": "M", "hparams": {}}}, [], {}, {})
+    for t in ("case_level", "element_level", "severity_ranking", "pr_auc", "near_limit_mae"):
+        assert sec in set(r[t].predictor), t
+    assert set(r["regression_n1_vs_base"].run_key) == {"gnn"}
+    assert not r["cost"].method.str.contains("node_theta", regex=False).any()
+    assert set(assess["_timing_s"]) == {"truth", "dc", "gnn"}
+    ns["print_contingency_report"](r)
+    out = capsys.readouterr().out
+    assert sec in out[out.index("HEADLINE 1"):out.index("CONTEXT")]
 
 
 def test_pq_only_filters_voltage_metrics(ns):  # [STSI 201026]:task 097 F1

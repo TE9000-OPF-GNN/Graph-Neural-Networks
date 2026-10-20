@@ -242,9 +242,10 @@ def test_real_no_solution_rows(ns, n1, runs):
     ns_rows = n1["rows"][n1["rows"].status.isin(statuses)]
     assert len(ns_rows) >= 1, "fixture has no no-solution outages (research §3 expects 4) - stop and report"
     res = ns["run_no_solution_assessment"](n1["rows"], n1["bases"], n1["header"], runs)
-    assert set(res) == {"dc", *runs, "_timing_s"} and "truth" not in res
+    sec = [k + "|node_theta" for k, r in runs.items() if ns["has_node_theta"](r)]   # [STSI 201026]:task 098 F4
+    assert set(res) == {"dc", *runs, *sec, "_timing_s"} and "truth" not in res
     assert set(res["_timing_s"]) == {"dc", *runs}
-    for p in ["dc", *runs]:
+    for p in [k for k in res if k != "_timing_s"]:
         bus_df, line_df = res[p]
         assert set(bus_df.case_id) == set(line_df.case_id) == set(ns_rows.case_id), p
         assert set(bus_df.status) <= set(statuses) and set(line_df.status) <= set(statuses)

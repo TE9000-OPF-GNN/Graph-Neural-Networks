@@ -8,6 +8,7 @@ they are skipped if the data is missing. Existing dataset files are only read.
 import json
 import os
 import sys
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -242,15 +243,71 @@ def test_predict_state_dc(ns, real):
     assert not df.loc[df.bus_type == "PQ", "under_v"].any()
 
 
+# [STSI 201026]:task 098 F4 - secondary '<k>|node_theta' predictor from one (stubbed) forward pass
+def _stub_forward(ns, net, dt_override=None):
+    """Truth-valued primary + truth Δθ (data.y_delta_theta) in the copy's return format."""
+    buses, lines = net.buses.index, net.lines.index
+    bus_res = pd.concat({b: pd.DataFrame({"V pu": net.buses_t.v_mag_pu[b]}) for b in buses}, axis=1)
+    line_res = pd.concat({l: pd.DataFrame({"P0 pu": net.lines_t.p0[l], "Q0 pu": net.lines_t.q0[l],
+                                           "P1 pu": net.lines_t.p1[l], "Q1 pu": net.lines_t.q1[l]}) for l in lines},
+                         axis=1)
+    ds = ns["PowerFlowDataset"]([net], angle_mode="edge_delta", ptdf_branch_mode="all")
+    dt = np.concatenate([ds[t].y_delta_theta.cpu().numpy() for t in range(len(net.snapshots))])
+    calls = []
+
+    def stub(*a, **k):
+        calls.append(k.get("collect_delta_theta"))
+        return bus_res, line_res, None, ({"dt_pred": dt if dt_override is None else dt_override})
+    return stub, calls
+
+
+@pytest.mark.parametrize("mode", ["edge_delta", "both"])
+def test_predict_states_gnn_node_theta_matches_truth(ns, real, monkeypatch, mode):
+    net = real["posts"][0]
+    stub, calls = _stub_forward(ns, net)
+    monkeypatch.setitem(ns, "predict_network_results_with_masks", stub)
+    out = ns["predict_states_gnn"]({"model": SimpleNamespace(angle_mode=mode), "hparams": {}}, "k", net)
+    assert set(out) == {"k", "k|node_theta", "_secondary_s"} and calls == [True]   # one forward pass
+    assert out["_secondary_s"] > 0.0
+    sec = out["k|node_theta"]
+    pd.testing.assert_frame_equal(sec["vmag"], out["k"]["vmag"])
+    for f in ("p0", "q0", "p1", "q1"):
+        assert list(sec[f].index) == list(net.snapshots) and list(sec[f].columns) == list(net.lines.index)
+        np.testing.assert_allclose(sec[f].to_numpy(dtype=float), getattr(net.lines_t, f)[net.lines.index].to_numpy(),
+                                   atol=1e-5, err_msg=f)
+
+
+def test_predict_states_gnn_node_mode_primary_only(ns, real, monkeypatch):
+    net = real["posts"][0]
+    stub, calls = _stub_forward(ns, net)
+    monkeypatch.setitem(ns, "predict_network_results_with_masks", stub)
+    out = ns["predict_states_gnn"]({"model": SimpleNamespace(angle_mode="node"), "hparams": {}}, "k", net)
+    assert set(out) == {"k", "_secondary_s"} and out["_secondary_s"] == 0.0 and calls == [True]
+
+
+def test_predict_states_gnn_bad_dt_raises(ns, real, monkeypatch):
+    net = real["posts"][0]
+    run = {"model": SimpleNamespace(angle_mode="edge_delta"), "hparams": {}}
+    stub, _ = _stub_forward(ns, net, dt_override=np.zeros(5))
+    monkeypatch.setitem(ns, "predict_network_results_with_masks", stub)
+    with pytest.raises(RuntimeError, match="dt_pred has 5 values"):
+        ns["predict_states_gnn"](run, "k", net)
+    monkeypatch.setitem(ns, "predict_network_results_with_masks", lambda *a, **k: (*stub()[:3], {}))
+    with pytest.raises(RuntimeError, match="no Δθ prediction"):
+        ns["predict_states_gnn"](run, "k", net)
+
+
 def test_run_violation_assessment(ns, real, s8_run):
     key = s8_run["run_key"]
     res = ns["run_violation_assessment"](real["posts"], real["rows"], real["base_nets"], {key: s8_run})
-    assert {k for k in res if not k.startswith("_")} == {"truth", "dc", key}
+    sec = [f"{key}|node_theta"] if ns["has_node_theta"](s8_run) else []   # [STSI 201026]:task 098 F4
+    assert sec, "S8 run is edge_delta - expected a secondary predictor"
+    assert {k for k in res if not k.startswith("_")} == {"truth", "dc", key, *sec}
     assert set(res["_timing_s"]) == {"truth", "dc", key}
     n_bus = sum(len(n.snapshots) * len(n.buses) for n in real["posts"])
     n_line = sum(len(n.snapshots) * len(n.lines) for n in real["posts"])
     keysets = {}
-    for p in ("truth", "dc", key):
+    for p in ("truth", "dc", key, *sec):
         bus_df, line_df = res[p]
         assert len(bus_df) == n_bus and len(line_df) == n_line
         assert set(bus_df.predictor) == {p} and set(line_df.predictor) == {p}
@@ -258,7 +315,8 @@ def test_run_violation_assessment(ns, real, s8_run):
         keysets[p] = (set(map(tuple, bus_df[["case_id", "snapshot", "bus"]].to_numpy())),
                       set(map(tuple, line_df[["case_id", "snapshot", "line"]].to_numpy())))
         assert (bus_df.source_index == real["src"]).all() and (line_df.source_position == BASE_POS).all()
-    assert keysets["truth"] == keysets["dc"] == keysets[key]
+    assert keysets["truth"] == keysets["dc"] == keysets[key] == keysets[sec[0]]
+    pd.testing.assert_series_equal(res[key][0]["vmag"], res[sec[0]][0]["vmag"])   # same voltages
     assert len(keysets["truth"][0]) == n_bus and len(keysets["truth"][1]) == n_line
 
 
