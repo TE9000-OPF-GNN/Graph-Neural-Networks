@@ -220,6 +220,10 @@ def test_equivalence_with_089(ns, n1, runs):
     assert len(two) == 2
     rows = n1["rows"].copy()
     rows.loc[rows.case_id.isin(two.case_id), "status"] = "non_converged"
+    m2 = rows.case_id.isin(two.case_id)   # [STSI 201026]:task 100 - every snapshot failed (non_converged)
+    for f in ("failed_snapshots", "nonconverged_snapshots"):
+        rows[f] = [[str(t) for t in _base(n1, r).snapshots] if m else v
+                   for (_, r), m, v in zip(rows.iterrows(), m2, rows[f])]
     rows = rows[rows.case_id.isin(two.case_id) | (rows.status == "bridge_skipped")]
     got = ns["run_no_solution_assessment"](rows, n1["bases"], n1["header"], runs)
     ref = ns["run_violation_assessment"](n1["nets"], n1["rows"][n1["rows"].case_id.isin(two.case_id)],
@@ -237,17 +241,26 @@ def test_equivalence_with_089(ns, n1, runs):
                 assert (m[f"{c}_g"].astype(bool) == m[f"{c}_r"].astype(bool)).all(), (p, key, c)
 
 
+def _kept_failed(ns, row, statuses):
+    """[STSI 201026]:task 100 - failed snapshots (reason in statuses) minus base-failed, in base order."""
+    why = ns["failed_snapshot_reasons"](row)
+    bad = ns["base_failed_snapshots"](row)
+    return [t for t in row["_snaps"] if why.get(str(t)) in statuses and str(t) not in bad]
+
+
 def test_real_no_solution_rows(ns, n1, runs):
     statuses = ns["NO_SOLUTION_STATUSES"]
-    ns_rows = n1["rows"][n1["rows"].status.isin(statuses)]
-    assert len(ns_rows) >= 1, "fixture has no no-solution outages (research §3 expects 4) - stop and report"
+    ns_rows = n1["rows"][n1["rows"]["failed_snapshots"].map(len) > 0].copy()   # [STSI 201026]:task 100
+    assert len(ns_rows) >= 1, "fixture has no failed snapshots (research §3 expects 4 outages) - stop and report"
+    ns_rows["_snaps"] = [list(_base(n1, r).snapshots) for _, r in ns_rows.iterrows()]
+    kept = {r["case_id"]: _kept_failed(ns, r, statuses) for _, r in ns_rows.iterrows()}
     res = ns["run_no_solution_assessment"](n1["rows"], n1["bases"], n1["header"], runs)
     sec = [k + "|node_theta" for k, r in runs.items() if ns["has_node_theta"](r)]   # [STSI 201026]:task 098 F4
     assert set(res) == {"dc", *runs, *sec, "_timing_s"} and "truth" not in res
     assert set(res["_timing_s"]) == {"dc", *runs}
     for p in [k for k in res if k != "_timing_s"]:
         bus_df, line_df = res[p]
-        assert set(bus_df.case_id) == set(line_df.case_id) == set(ns_rows.case_id), p
+        assert set(bus_df.case_id) == set(line_df.case_id) == {c for c, k in kept.items() if k}, p
         assert set(bus_df.status) <= set(statuses) and set(line_df.status) <= set(statuses)
         assert set(bus_df.predictor) == set(line_df.predictor) == {p}
         for _, row in ns_rows.iterrows():
@@ -255,38 +268,54 @@ def test_real_no_solution_rows(ns, n1, runs):
             b = bus_df[bus_df.case_id == row["case_id"]]
             l = line_df[line_df.case_id == row["case_id"]]
             post_lines = [n for n in base.lines.index if n != row["outage_name"]]
-            ok = [t for t in base.snapshots if str(t) not in ns["base_failed_snapshots"](row)]   # [STSI 151026]:task 093
+            ok = kept[row["case_id"]]
             assert len(b) == len(ok) * len(base.buses), (p, row["case_id"])
             assert len(l) == len(ok) * len(post_lines), (p, row["case_id"])
+            if not ok:
+                continue
             assert set(b.bus) == set(base.buses.index) and set(l.line) == set(post_lines)
             assert set(b.snapshot) == set(ok) and set(l.snapshot) == set(ok)
-            assert (b.status == row["status"]).all() and (l.status == row["status"]).all()
+            why = ns["failed_snapshot_reasons"](row)
+            assert (b.status == b.snapshot.map(str).map(why)).all() and (l.status == l.snapshot.map(str).map(why)).all()
         assert np.isfinite(bus_df["vmag"].to_numpy(dtype=float)).all(), p
         assert np.isfinite(line_df.loc[line_df.rated, "loading"].to_numpy(dtype=float)).all(), p
 
 
+def _set_lists(rows, case_id, **lists):
+    """[STSI 201026]:task 100 - set list-valued sidecar fields of one row (copy of rows)."""
+    rows = rows.copy()
+    for f, v in lists.items():
+        rows[f] = [list(v) if c == case_id else x for c, x in zip(rows.case_id, rows[f])]
+    return rows
+
+
 def test_statuses_filter(ns, n1):
-    rows = n1["rows"].copy()
     relabel = int(_solved(n1).iloc[0]["case_id"])
-    rows.loc[rows.case_id == relabel, "status"] = "sanity_rejected"
-    real_ns = n1["rows"][n1["rows"].status.isin(ns["NO_SOLUTION_STATUSES"])]
-    excluded = set(n1["rows"].loc[n1["rows"].status.isin(["solved", "bridge_skipped"]), "case_id"]) - {relabel}
+    s0 = str(_base(n1, _solved(n1).iloc[0]).snapshots[0])
+    rows = _set_lists(n1["rows"], relabel, failed_snapshots=[s0], sanity_failed_snapshots=[s0])   # [STSI 201026]:task 100
+    real_ns = n1["rows"][n1["rows"]["failed_snapshots"].map(len) > 0]
+    excluded = set(n1["rows"].case_id) - set(real_ns.case_id) - {relabel}
 
     res = ns["run_no_solution_assessment"](rows, n1["bases"], n1["header"], {})
-    ids = set(res["dc"][0].case_id)
+    bus = res["dc"][0]
+    ids = set(bus.case_id)
     assert ids == set(real_ns.case_id) | {relabel}
     assert not ids & excluded
+    r = bus[bus.case_id == relabel]
+    assert set(r.snapshot.map(str)) == {s0} and set(r.status) == {"sanity_rejected"}
 
     res_nc = ns["run_no_solution_assessment"](rows, n1["bases"], n1["header"], {}, statuses=("non_converged",))
-    if (rows.status == "non_converged").any():
+    nc_ids = {r_["case_id"] for _, r_ in rows.iterrows()
+              if "non_converged" in ns["failed_snapshot_reasons"](r_).values()}
+    if nc_ids:
         ids_nc = set(res_nc["dc"][0].case_id)
-        assert ids_nc == set(rows.loc[rows.status == "non_converged", "case_id"])
+        assert ids_nc == nc_ids
         assert relabel not in ids_nc and set(res_nc["dc"][0].status) == {"non_converged"}
     else:
         assert res_nc == {"_timing_s": {}}
 
-    only_solved = n1["rows"][n1["rows"].status.isin(["solved", "bridge_skipped"])]
-    assert ns["run_no_solution_assessment"](only_solved, n1["bases"], n1["header"], {}) == {"_timing_s": {}}
+    no_failed = n1["rows"][n1["rows"]["failed_snapshots"].map(len) == 0]
+    assert ns["run_no_solution_assessment"](no_failed, n1["bases"], n1["header"], {}) == {"_timing_s": {}}
 
 
 def test_source_guard():
@@ -304,9 +333,11 @@ def test_fixture_bases_all_ok(ns, n1):
 
 def test_no_solution_drops_base_failed(ns, n1):
     statuses = ns["NO_SOLUTION_STATUSES"]
-    first = n1["rows"][n1["rows"].status.isin(statuses)].iloc[0]
+    failed = n1["rows"][n1["rows"]["failed_snapshots"].map(len) > 1]   # [STSI 201026]:task 100 - per failed snapshot
+    assert len(failed), "fixture has no outage with >= 2 failed snapshots"
+    first = failed.iloc[0]
     k = (first["source_index"], int(first["source_position"]))
-    snaps = n1["bases"][k].snapshots
+    snaps = [t for t in n1["bases"][k].snapshots if str(t) in set(first["failed_snapshots"])]
     s0, s1 = str(snaps[0]), str(snaps[1])
     rows = n1["rows"].copy()
     of_k = [(r["source_index"], int(r["source_position"])) == k for _, r in rows.iterrows()]
@@ -315,10 +346,36 @@ def test_no_solution_drops_base_failed(ns, n1):
     res = ns["run_no_solution_assessment"](rows, n1["bases"], n1["header"], {})
     bus_df = res["dc"][0]
     for (_, row), m in zip(rows.iterrows(), of_k):
-        if row["status"] not in statuses:
+        if not len(row["failed_snapshots"]):
             continue
         base = _base(n1, row)
+        fail = {s for s, why in ns["failed_snapshot_reasons"](row).items() if why in statuses}
+        exp = fail - ns["base_failed_snapshots"](row)
         b = bus_df[bus_df.case_id == row["case_id"]]
-        n_snap = len(base.snapshots) - (2 if m else 0)
-        assert len(b) == n_snap * len(base.buses), row["case_id"]
-        assert set(b.snapshot.map(str)).isdisjoint({s0, s1}) if m else len(set(b.snapshot)) == len(base.snapshots)
+        assert len(b) == len(exp) * len(base.buses), row["case_id"]
+        assert set(b.snapshot.map(str)) == exp, row["case_id"]
+        if m:
+            assert set(b.snapshot.map(str)).isdisjoint({s0, s1})
+
+
+def test_partial_outage_split(ns, n1):
+    # [STSI 201026]:task 100 F3 - solved snapshots scored on the stored net, failed ones on the rebuilt graph
+    row0 = _solved(n1).iloc[0]
+    fp, cid = int(row0["file_position"]), row0["case_id"]
+    snaps = list(n1["nets"][fp].snapshots)
+    two, rest = [str(t) for t in snaps[:2]], snaps[2:]
+    rows = _set_lists(n1["rows"], cid, failed_snapshots=two, nonconverged_snapshots=two)
+    rows.loc[rows.case_id == cid, ["status", "n_solved_snapshots"]] = ["partial", len(rest)]
+    nets = list(n1["nets"])
+    nets[fp] = n1["nets"][fp].copy(snapshots=rest)
+    one = rows[rows.case_id == cid]
+    sol = ns["run_violation_assessment"](nets, one, n1["bases"], {})
+    nos = ns["run_no_solution_assessment"](one, n1["bases"], n1["header"], {})
+    keys = lambda df: set(zip(df.case_id, df.snapshot.map(str)))
+    k_sol, k_nos = keys(sol["truth"][0]), keys(nos["dc"][0])
+    assert k_sol == keys(sol["dc"][0]) == {(cid, str(t)) for t in rest}
+    assert k_nos == {(cid, s) for s in two}
+    assert k_sol.isdisjoint(k_nos)
+    assert k_sol | k_nos == {(cid, str(t)) for t in _base(n1, row0).snapshots}   # fixture bases all ok
+    assert set(nos["dc"][0].status) == {"non_converged"} and "truth" not in nos
+    assert len(n1["nets"][fp].snapshots) == len(snaps)   # fixture net untouched

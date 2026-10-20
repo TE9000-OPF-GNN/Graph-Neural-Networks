@@ -252,12 +252,16 @@ def test_no_solution_flag_table(ns):
 
 # ── outage summary ───────────────────────────────────────────────────────────
 def _sidecar(bad_nc=(), bad_san=()):
-    st = ["bridge_skipped", "bridge_skipped", "non_converged", "sanity_rejected", "solved", "solved", "solved"]
-    return pd.DataFrame(dict(case_id=range(7), status=st, system="A", source_index="src", source_position=0,
-                             nonconverged_snapshots=[[], [], ["0", "1", "2"], [], [], [], []],
-                             file_position=[None, None, None, None, 0, 1, 2],
-                             base_nonconverged_snapshots=[list(bad_nc) for _ in range(7)],   # [STSI 151026]:task 093
-                             base_sanity_failed_snapshots=[list(bad_san) for _ in range(7)]))
+    st = ["bridge_skipped", "bridge_skipped", "non_converged", "sanity_rejected", "solved", "solved", "solved",
+          "partial"]   # [STSI 201026]:task 100 - per-snapshot fields + one partial outage
+    all24 = [str(t) for t in range(24)]
+    return pd.DataFrame(dict(case_id=range(8), status=st, system="A", source_index="src", source_position=0,
+                             failed_snapshots=[[], [], all24, all24, [], [], [], ["5", "6"]],
+                             nonconverged_snapshots=[[], [], all24, [], [], [], [], ["5"]],
+                             sanity_failed_snapshots=[[], [], [], all24, [], [], [], ["6"]],
+                             file_position=[None, None, None, None, 0, 1, 2, 3],
+                             base_nonconverged_snapshots=[list(bad_nc) for _ in range(8)],   # [STSI 151026]:task 093
+                             base_sanity_failed_snapshots=[list(bad_san) for _ in range(8)]))
 
 
 def test_outage_summary(ns):
@@ -269,19 +273,20 @@ def test_outage_summary(ns):
     s = ns["outage_summary"](rows, labels, bases)
     assert list(s.system) == ["ALL", "A"]
     r = s[s.system == "ALL"].iloc[0]
-    assert (r.n_outages, r.n_islanding, r.n_non_converged, r.n_sanity_rejected, r.n_solved) == (7, 2, 1, 1, 3)
-    assert (r.cs_solved, r.cs_islanding, r.cs_no_solution_severe) == (72, 48, 48)
+    assert (r.n_outages, r.n_islanding, r.n_non_converged, r.n_sanity_rejected, r.n_partial, r.n_solved) == \
+        (8, 2, 1, 1, 1, 3)   # [STSI 201026]:task 100 - partial row: +2 failed snapshots
+    assert (r.cs_solved, r.cs_islanding, r.cs_no_solution_severe) == (72, 48, 50)
     assert r.cs_base_nonconverged_no_solution == 0 and r.cs_base_nonconverged_solved == 0   # [STSI 151026]:task 093
     assert r.share_any_violation_solved == pytest.approx(36 / 72)
     assert r.share_any_severe_solved == pytest.approx(12 / 72)
-    assert r.share_any_violation_incl_no_solution == pytest.approx((36 + 48) / 120)
-    assert r.share_any_severe_incl_no_solution == pytest.approx((12 + 48) / 120)   # bridges never severe
+    assert r.share_any_violation_incl_no_solution == pytest.approx((36 + 50) / 122)
+    assert r.share_any_severe_incl_no_solution == pytest.approx((12 + 50) / 122)   # bridges never severe
     assert r.share_any_induced_solved == pytest.approx(36 / 72)   # [STSI 201026]:task 097 induced == violation here
-    assert r.share_any_induced_incl_no_solution == pytest.approx((36 + 48) / 120)
+    assert r.share_any_induced_incl_no_solution == pytest.approx((36 + 50) / 122)
     s_nc = ns["outage_summary"](rows, labels, bases, no_solution_statuses=("non_converged",))
     r = s_nc[s_nc.system == "ALL"].iloc[0]
-    assert (r.cs_islanding, r.cs_no_solution_severe) == (48, 24)
-    assert r.share_any_severe_incl_no_solution == pytest.approx((12 + 24) / 96)
+    assert (r.cs_islanding, r.cs_no_solution_severe) == (48, 25)   # partial: only "5" is non_converged
+    assert r.share_any_severe_incl_no_solution == pytest.approx((12 + 25) / 97)
 
 
 def test_outage_summary_base_failed(ns):
@@ -292,12 +297,13 @@ def test_outage_summary_base_failed(ns):
     bus = _bus_frame([(c, "A", t, "b0", v[c][t]) for c in (4, 5, 6) for t in range(2, 24)])
     labels = ns["case_snapshot_labels"](bus, _empty_lines())
     r = ns["outage_summary"](rows, labels, bases).set_index("system").loc["ALL"]
-    assert (r.cs_solved, r.cs_islanding, r.cs_no_solution_severe) == (66, 48, 44)
-    assert (r.cs_base_nonconverged_no_solution, r.cs_base_nonconverged_solved) == (4, 6)
-    assert r.share_any_violation_incl_no_solution == pytest.approx((32 + 44) / 110)
-    assert r.share_any_severe_incl_no_solution == pytest.approx((10 + 44) / 110)
+    # [STSI 201026]:task 100 - partial row: failed "5","6" are base-ok (+2 ns); its stored "0","1" are base-failed (+2)
+    assert (r.cs_solved, r.cs_islanding, r.cs_no_solution_severe) == (66, 48, 46)
+    assert (r.cs_base_nonconverged_no_solution, r.cs_base_nonconverged_solved) == (4, 8)
+    assert r.share_any_violation_incl_no_solution == pytest.approx((32 + 46) / 112)
+    assert r.share_any_severe_incl_no_solution == pytest.approx((10 + 46) / 112)
     r = ns["outage_summary"](rows, labels, bases, no_solution_statuses=("non_converged",)).set_index("system").loc["ALL"]
-    assert (r.cs_no_solution_severe, r.cs_base_nonconverged_no_solution) == (22, 2)
+    assert (r.cs_no_solution_severe, r.cs_base_nonconverged_no_solution) == (23, 2)
 
 
 # ── severity / PR-AUC / near-limit ───────────────────────────────────────────
@@ -438,7 +444,10 @@ def test_build_and_print_report(ns, capsys):
     no_sol = {"dc": no_sol["p"], "gnn": no_sol["p"], "_timing_s": {}}
     rows = pd.DataFrame(dict(case_id=[0, 1, 2, 5, 6, 7], system=["A", "A", "B", "A", "A", "B"],
                              status=["solved"] * 3 + ["non_converged", "sanity_rejected", "bridge_skipped"],
-                             source_index="src", source_position=0,
+                             source_index="src", source_position=0, file_position=[0, 1, 2, None, None, None],
+                             failed_snapshots=[[], [], [], ["0", "1", "2", "3"], ["0", "1", "2", "3"], []],   # [STSI 201026]:task 100
+                             nonconverged_snapshots=[[], [], [], ["0", "1", "2", "3"], [], []],
+                             sanity_failed_snapshots=[[], [], [], [], ["0", "1", "2", "3"], []],
                              base_nonconverged_snapshots=[[] for _ in range(6)],   # [STSI 151026]:task 093
                              base_sanity_failed_snapshots=[[] for _ in range(6)]))
     bases = {("src", 0): SimpleNamespace(snapshots=pd.RangeIndex(4))}
@@ -473,6 +482,7 @@ def test_secondary_predictor_in_tables_not_in_cost(ns, monkeypatch, capsys):  # 
                         lambda model, nets, **kw: {"vmag_mae": 0.01, "batch_solve_time_ms": 1.0, "total_time_ms": 2.0})
     rows = pd.DataFrame(dict(case_id=[0, 1, 2], system=["A", "A", "B"], status="solved", source_index="src",
                              source_position=0, file_position=[0, 1, 2],
+                             **{f: [[] for _ in range(3)] for f in ns["OUTAGE_CHECK_FIELDS"]},   # [STSI 201026]:task 100
                              base_nonconverged_snapshots=[[] for _ in range(3)],
                              base_sanity_failed_snapshots=[[] for _ in range(3)]))
     bases = {("src", 0): SimpleNamespace(snapshots=pd.RangeIndex(4))}
@@ -492,6 +502,7 @@ def test_pq_only_filters_voltage_metrics(ns):  # [STSI 201026]:task 097 F1
     assess = {"truth": (b(), _empty_lines()), "p": (b(), _empty_lines()), "_timing_s": {}}
     before = {k: (v[0].copy(), v[1].copy()) for k, v in assess.items() if k != "_timing_s"}
     rows = pd.DataFrame(dict(case_id=[0], system=["A"], status=["solved"], source_index="src", source_position=0,
+                             file_position=[0], **{f: [[]] for f in ns["OUTAGE_CHECK_FIELDS"]},   # [STSI 201026]:task 100
                              base_nonconverged_snapshots=[[]], base_sanity_failed_snapshots=[[]]))
     r = ns["build_contingency_report"](assess, None, rows, {("src", 0): SimpleNamespace(snapshots=pd.RangeIndex(1))},
                                        {}, [], {}, {})
@@ -552,6 +563,7 @@ def test_build_report_restricts_regression_nets(ns, monkeypatch):
     tiny4 = _tiny_net(ns)
     rows = pd.DataFrame(dict(case_id=[0, 1, 2], system=["A", "A", "B"], status="solved", source_index="src",
                              source_position=0, file_position=[0, 1, 2],
+                             **{f: [[] for _ in range(3)] for f in ns["OUTAGE_CHECK_FIELDS"]},   # [STSI 201026]:task 100
                              base_nonconverged_snapshots=[[] for _ in range(3)],
                              base_sanity_failed_snapshots=[["3"] for _ in range(3)]))
     ns["build_contingency_report"](_random_assess(), None, rows, {("src", 0): tiny4}, {"r": {}}, [tiny4] * 3, {}, {})

@@ -144,24 +144,32 @@ def n1(tmp_path_factory):
 
 def test_load_n1_dataset(ns, n1):
     nets, header, rows = ns["load_n1_dataset"](n1["summary"]["index_path"])
-    solved = rows[rows.status == "solved"]
-    assert len(solved) > 0
-    assert len(nets) == len(solved)
+    stored = rows[rows.file_position.notna()]   # [STSI 201026]:task 100 - solved + partial outages
+    assert len(stored) > 0
+    assert len(nets) == len(stored)
     assert "rows" not in header and header["tag"] == "n1_mixed_1500_w_pytest088"
+    assert header["outage_check"]["granularity"] == "per_snapshot"
     for f in ns["BASE_CHECK_FIELDS"]:   # [STSI 151026]:task 093 sidecar fields present
         assert f in rows.columns and all(isinstance(v, list) for v in rows[f]), f
     for i, net in enumerate(nets):
-        outage = rows.loc[rows.file_position == i, "outage_name"]
-        assert len(outage) == 1
-        assert outage.iloc[0] not in net.lines.index
+        r = rows[rows.file_position == i]
+        assert len(r) == 1
+        assert r.outage_name.iloc[0] not in net.lines.index
+        assert len(net.snapshots) == int(r.n_solved_snapshots.iloc[0])
 
 
-def _fake_n1(tmp_path, files, **fields):
+def _fake_n1(tmp_path, files, header=None, **fields):
     row = dict(case_id=0, status="bridge_skipped", file_position=None, source_index="src", source_position=0,
                system="A", outage_name="l0", **fields)
     (tmp_path / "n1_fake.json").write_text(json.dumps({"tag": "n1_fake", "files": files}), encoding="utf-8")
-    (tmp_path / "n1_fake_meta.json").write_text(json.dumps({"tag": "n1_fake", "rows": [row]}), encoding="utf-8")
+    (tmp_path / "n1_fake_meta.json").write_text(json.dumps({"tag": "n1_fake", **(header or {}), "rows": [row]}),
+                                                encoding="utf-8")
     return str(tmp_path / "n1_fake.json")
+
+
+_PER_SNAPSHOT = {"outage_check": {"granularity": "per_snapshot"}}   # [STSI 201026]:task 100
+_OUTAGE_FIELDS = dict(failed_snapshots=[], nonconverged_snapshots=[], sanity_failed_snapshots=[], n_solved_snapshots=0)
+_BASE_FIELDS = dict(base_nonconverged_snapshots=[], base_sanity_failed_snapshots=["x"])
 
 
 def test_load_n1_dataset_requires_base_fields(ns, tmp_path):
@@ -171,9 +179,39 @@ def test_load_n1_dataset_requires_base_fields(ns, tmp_path):
     with pytest.raises(ValueError, match="base-check"):
         ns["load_n1_dataset"](_fake_n1(tmp_path, ["missing/x.nc"], base_nonconverged_snapshots=[],
                                        base_sanity_failed_snapshots=None))
-    nets, header, rows = ns["load_n1_dataset"](_fake_n1(tmp_path, [], base_nonconverged_snapshots=[],
-                                                         base_sanity_failed_snapshots=["x"]))
-    assert nets == [] and header == {"tag": "n1_fake"} and len(rows) == 1
+    nets, header, rows = ns["load_n1_dataset"](_fake_n1(tmp_path, [], header=_PER_SNAPSHOT, **_BASE_FIELDS,
+                                                         **_OUTAGE_FIELDS))
+    assert nets == [] and header == {"tag": "n1_fake", **_PER_SNAPSHOT} and len(rows) == 1
+
+
+def test_load_n1_dataset_requires_outage_check(ns, tmp_path):
+    # [STSI 201026]:task 100 D-F3d - no per-snapshot outage check -> raise before any .nc is loaded
+    with pytest.raises(ValueError, match="per-snapshot outage check"):
+        ns["load_n1_dataset"](_fake_n1(tmp_path, ["missing/x.nc"], **_BASE_FIELDS, **_OUTAGE_FIELDS))
+    with pytest.raises(ValueError, match="per-snapshot outage check"):
+        ns["load_n1_dataset"](_fake_n1(tmp_path, ["missing/x.nc"], header={"outage_check": {"granularity": "x"}},
+                                       **_BASE_FIELDS, **_OUTAGE_FIELDS))
+    for drop in ("failed_snapshots", "n_solved_snapshots"):
+        fields = {k: v for k, v in _OUTAGE_FIELDS.items() if k != drop}
+        with pytest.raises(ValueError, match="per-snapshot outage check"):
+            ns["load_n1_dataset"](_fake_n1(tmp_path, ["missing/x.nc"], header=_PER_SNAPSHOT, **_BASE_FIELDS,
+                                           **fields))
+    with pytest.raises(ValueError, match="per-snapshot outage check"):
+        ns["load_n1_dataset"](_fake_n1(tmp_path, ["missing/x.nc"], header=_PER_SNAPSHOT, **_BASE_FIELDS,
+                                       **{**_OUTAGE_FIELDS, "sanity_failed_snapshots": None}))
+
+
+def test_old_real_sidecars_raise(ns, monkeypatch):
+    # [STSI 201026]:task 100 D-F3d - pre-099 real datasets raise; read-only (no .nc loaded)
+    loaded = []
+    monkeypatch.setitem(ns, "load_dataset_list", lambda *a, **k: loaded.append(a) or [])
+    for name in ("n1_mixed_1500_w_Test_1.json", "n1_ieee57_1500_w_Test_57.json"):
+        p = os.path.join(ns["TRAINING_NETWORKS_DIR"], name)
+        if not os.path.isfile(p[:-len(".json")] + "_meta.json"):
+            pytest.skip(f"sidecar not found: {p}")
+        with pytest.raises(ValueError, match="per-snapshot outage check"):
+            ns["load_n1_dataset"](p)
+    assert loaded == []
 
 
 def test_base_failed_helpers(ns):
