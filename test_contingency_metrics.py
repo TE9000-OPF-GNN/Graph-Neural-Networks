@@ -42,16 +42,25 @@ def _code_sources(path):
             for c in cells if c["cell_type"] == "code"]
 
 
-def _exec_all(name):
-    namespace = {"__name__": name}
+# [STSI 191026]:task 095 - never exec driver / toggles / user config; toggles forced off (F11)
+SKIP_BANNERS = (DRIVER_BANNER, "# ==== CONTINGENCY: USER CONFIG (task 095) ====",
+                "contingency notebook execution toggles")
+FORCED_OFF = dict(run_contingency_eval=False, run_ref_timing=False)
+
+
+def _exec_contingency(name, include_driver=False):
+    namespace = {"__name__": name, **FORCED_OFF}
     for i, src in enumerate(_code_sources(CONTINGENCY)):
+        if any(b in src for b in SKIP_BANNERS) and not (include_driver and DRIVER_BANNER in src):
+            continue
         exec(compile(_clean(src), f"<contingency:code{i}>", "exec"), namespace)  # noqa: S102
+        namespace.update(FORCED_OFF)
     return namespace
 
 
 @pytest.fixture(scope="module")
 def ns():
-    return _exec_all("__task090_test__")
+    return _exec_contingency("__task090_test__")
 
 
 # ── synthetic record builders (task 089 schema, default bands 0.90/1.10 and 0.85/1.15, severe factor 1.2) ──
@@ -489,7 +498,7 @@ def _driver_src():
 
 
 def test_exec_all_cells_driver_inert():
-    fresh = _exec_all("__task090_fresh__")
+    fresh = _exec_contingency("__task090_fresh__", include_driver=True)   # [STSI 191026]:task 095 driver only, no config
     assert fresh["run_contingency_eval"] is False
     assert fresh["N1_INDEX_PATH"] is None and fresh["RUN_KEYS"] is None and fresh["SWEEP_PATHS"] is None
     for name in ("assess", "no_sol", "report", "n1_nets", "runs"):
@@ -507,7 +516,14 @@ def test_cell_order_and_source_guard():
     assert "run_no_solution_assessment(" in drv and "build_contingency_report(" in drv
     assert 'if globals().get("run_contingency_eval", False):' in drv   # [STSI 141026]:driver reads the 088 toggle, no local copy
     assert "run_contingency_eval = False" not in drv
-    assert "RUN_KEYS      = None" in drv and "N1_INDEX_PATH = None" in drv   # D6/D7: supplied at call time
+    assert 'RUN_KEYS      = globals().get("RUN_KEYS", None)' in drv   # [STSI 191026]:task 095 values from USER CONFIG
+    assert 'N1_INDEX_PATH = globals().get("N1_INDEX_PATH", None)' in drv
+    assert 'globals().get("run_ref_timing", False)' in drv
+    assert not any(l.startswith(("path=", "sweep_paths =")) for l in drv.split("\n"))
+    icfg = [i for i, s in enumerate(srcs) if "# ==== CONTINGENCY: USER CONFIG (task 095) ====" in s]
+    assert icfg == [idrv - 1] and "run_keys=[" in srcs[idrv - 2]
+    with open(CONTINGENCY, encoding="utf-8") as fh:
+        assert len(json.load(fh)["cells"]) >= 20
     assert "NO_SOLUTION_STATUSES = " not in srcs[ilib]   # reuses task 091's constant
 
 
@@ -522,7 +538,7 @@ def test_driver_wiring(ns):
         return f
 
     env = dict(ns)
-    env.update(run_contingency_eval=True, run_ref_timing=False,   # [STSI 141026]:flip the 088 toggle in the namespace
+    env.update(run_contingency_eval=True, run_ref_timing=False, RUN_KEYS=["k"],   # [STSI 191026]:task 095 RUN_KEYS via globals
                load_n1_dataset=stub("load_n1_dataset", ("NETS", "HDR", "ROWS")),
                load_source_base_nets=stub("load_source_base_nets", "BASES"),
                load_runs_by_key=stub("load_runs_by_key", "RUNS"),
@@ -532,8 +548,8 @@ def test_driver_wiring(ns):
                build_contingency_report=stub("build_contingency_report", "REPORT"),
                print_contingency_report=stub("print_contingency_report", None),
                save_contingency_report=stub("save_contingency_report", None))
-    src = _driver_src().replace("RUN_KEYS      = None", "RUN_KEYS      = ['k']")
-    exec(compile(src, "<driver>", "exec"), env)  # noqa: S102
+    env.pop("SWEEP_PATHS", None)
+    exec(compile(_driver_src(), "<driver>", "exec"), env)  # noqa: S102
     names = [c[0] for c in calls]
     assert names == ["load_n1_dataset", "load_source_base_nets", "load_runs_by_key", "run_violation_assessment",
                      "run_no_solution_assessment", "build_contingency_report", "print_contingency_report"]
