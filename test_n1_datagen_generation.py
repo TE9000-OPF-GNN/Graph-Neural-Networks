@@ -22,6 +22,7 @@ ANALYSIS = os.path.join(REPO, "GNN_Powerflow_V2.7_Analysis.ipynb")
 GEN_MARKER = "# ==== N-1 CONTINGENCY: GENERATION (task 087) ===="
 DRV_MARKER = "# ==== N-1 CONTINGENCY: DRIVER (task 087) ===="
 COPY_MARKER = "# [COPY of GNN_Powerflow_V2.7_Analysis::reconstruct_test_split]"
+DG_DRIVER_BANNER = DRV_MARKER   # [STSI 191026]:task 095 the N-1 driver cell is never exec'd
 
 # first code cell containing each marker is exec'd, in this order (task 086 list + the two new cells)
 _CELL_MARKERS = [
@@ -73,7 +74,11 @@ SOURCE_SHA_BEFORE = _sha256(SOURCE_INDEX) if os.path.isfile(SOURCE_INDEX) else N
 def ns():
     namespace = {"__name__": "__task087_test__"}
     for marker in _CELL_MARKERS:
-        exec(compile(_cell_source(marker), f"<notebook:{marker}>", "exec"), namespace)  # noqa: S102
+        src = _cell_source(marker)
+        if DG_DRIVER_BANNER in src:   # [STSI 191026]:task 095 skip the driver, force its toggle off
+            continue
+        exec(compile(src, f"<notebook:{marker}>", "exec"), namespace)  # noqa: S102
+    namespace["run_contingency_gen"] = False
     return namespace
 
 
@@ -108,9 +113,7 @@ def test_two_cells_appended_after_limits_cell():
     assert cells[75]["cell_type"] == cells[76]["cell_type"] == "code"
     assert gen.startswith(GEN_MARKER)
     assert drv.startswith(DRV_MARKER)
-    assert "run_contingency_gen = False" in drv
-    assert "N1_N_BASE         = None" in drv
-    assert '"mixed_1500_w.json"' in drv
+    assert "run_contingency_gen = False" in drv   # [STSI 191026]:task 095 N1_* are user values, not asserted (D-F11b)
     for src in (gen, drv):
         for forbidden in ('["s_nom"] =', '["v_nom"] =', '["tap_ratio"] =', "sn_mva =", "code_base"):
             assert forbidden not in src
