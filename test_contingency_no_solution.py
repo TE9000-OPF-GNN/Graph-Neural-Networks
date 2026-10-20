@@ -18,7 +18,12 @@ import torch
 REPO = os.path.dirname(os.path.abspath(__file__))
 CONTINGENCY = os.path.join(REPO, "GNN_Powerflow_V2.7_Contingency.ipynb")
 DATAGEN = os.path.join(REPO, "GNN_Powerflow_V2.6_DataGen.ipynb")
-TOGGLES_MARKER = "run_contingency_eval = False"
+# [STSI 191026]:task 095 - never exec driver / toggles / user config; toggles forced off (F11)
+DRIVER_BANNER = "# ==== CONTINGENCY: DRIVER (task 090) ===="
+SKIP_BANNERS = (DRIVER_BANNER, "# ==== CONTINGENCY: USER CONFIG (task 095) ====",
+                "contingency notebook execution toggles")
+FORCED_OFF = dict(run_contingency_eval=False, run_ref_timing=False)
+DG_DRIVER_BANNER = "# ==== N-1 CONTINGENCY: DRIVER (task 087) ===="
 BANNER = "# ==== CONTINGENCY: NO-SOLUTION OUTAGES (task 091) ===="
 S8_NAME = "sweep_S8_new_curriculum.json"
 ATOL = 1e-5
@@ -53,13 +58,19 @@ def _code_sources(path):
             for c in cells if c["cell_type"] == "code"]
 
 
-@pytest.fixture(scope="module")
-def ns():
-    namespace = {"__name__": "__task091_test__"}
+def _exec_contingency(name, include_driver=False):
+    namespace = {"__name__": name, **FORCED_OFF}
     for i, src in enumerate(_code_sources(CONTINGENCY)):
-        if TOGGLES_MARKER in src:
+        if any(b in src for b in SKIP_BANNERS) and not (include_driver and DRIVER_BANNER in src):
             continue
         exec(compile(_clean(src), f"<contingency:code{i}>", "exec"), namespace)  # noqa: S102
+        namespace.update(FORCED_OFF)
+    return namespace
+
+
+@pytest.fixture(scope="module")
+def ns():
+    namespace = _exec_contingency("__task091_test__")
     main = sys.modules["__main__"]
     had, old = hasattr(main, "PowerFlowGNN"), getattr(main, "PowerFlowGNN", None)
     main.PowerFlowGNN = namespace["PowerFlowGNN"]  # unpickling resolves the class from __main__
@@ -77,7 +88,10 @@ def n1(ns, tmp_path_factory):
     for marker in _DATAGEN_MARKERS:
         src = next((s for s in srcs if marker in s), None)
         assert src is not None, marker
+        if DG_DRIVER_BANNER in src:   # [STSI 191026]:task 095 never exec the DataGen N-1 driver
+            continue
         exec(compile(src, f"<datagen:{marker}>", "exec"), dg)  # noqa: S102
+    dg["run_contingency_gen"] = False
     if not os.path.isdir(dg["DATA_ROOT"]):
         pytest.skip(f"DATA_ROOT not found: {dg['DATA_ROOT']}")
     source = os.path.join(dg["TRAINING_NETWORKS_DIR"], "mixed_1500_w.json")

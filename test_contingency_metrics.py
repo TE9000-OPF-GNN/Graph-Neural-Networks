@@ -64,9 +64,10 @@ def ns():
 
 
 # ── synthetic record builders (task 089 schema, default bands 0.90/1.10 and 0.85/1.15, severe factor 1.2) ──
-def _bus_frame(entries, pre=None, status=None):
-    """entries: (case_id, system, snapshot, bus, vmag); pre: per-row (pre_under, pre_over)."""
+def _bus_frame(entries, pre=None, status=None, bus_type=None):
+    """entries: (case_id, system, snapshot, bus, vmag); pre: per-row (pre_under, pre_over); bus_type default PQ."""
     df = pd.DataFrame(entries, columns=["case_id", "system", "snapshot", "bus", "vmag"])
+    df["bus_type"] = "PQ" if bus_type is None else list(bus_type)  # [STSI 201026]:task 097 F1 PQ-only filter input
     v = df["vmag"]
     df["under_v"], df["over_v"] = v < 0.90, v > 1.10
     df["violation"] = df["under_v"] | df["over_v"]
@@ -220,10 +221,13 @@ def test_case_level_no_solution(ns):
     assert r.recall == pytest.approx(0.5) and r.miss_rate == pytest.approx(0.5)
     solved = row("any")
     assert (solved.tp, solved.fn) == (2, 0) and solved.recall == 1.0
-    assert set(df[df.scope == "any+no_solution"].level) == {"violation", "severe"}
+    assert set(df[df.scope == "any+no_solution"].level) == set(ns["VIOLATION_LEVELS"])   # [STSI 201026]:task 097 all levels
     assert set(df[df.scope == "any+no_solution"].system) == {"ALL", "A"}
     sev = row("any+no_solution", "severe")   # nothing severe predicted; 4 no-solution positives missed
     assert (sev.tp, sev.fn) == (0, 4)
+    ind = row("any+no_solution", "contingency_induced")   # pre = 1.0 -> induced == violation; 2 solved + 4 no-solution
+    assert ind.tp + ind.fn == 2 + 4
+    assert (ind.tp, ind.fn, ind.fp, ind.tn) == (3, 3, 0, 1)
     without = ns["case_level_metrics"](assess)
     assert "any+no_solution" not in set(without.scope)
     pd.testing.assert_frame_equal(without, df[df.scope != "any+no_solution"].reset_index(drop=True))
@@ -272,6 +276,8 @@ def test_outage_summary(ns):
     assert r.share_any_severe_solved == pytest.approx(12 / 72)
     assert r.share_any_violation_incl_no_solution == pytest.approx((36 + 48) / 120)
     assert r.share_any_severe_incl_no_solution == pytest.approx((12 + 48) / 120)   # bridges never severe
+    assert r.share_any_induced_solved == pytest.approx(36 / 72)   # [STSI 201026]:task 097 induced == violation here
+    assert r.share_any_induced_incl_no_solution == pytest.approx((36 + 48) / 120)
     s_nc = ns["outage_summary"](rows, labels, bases, no_solution_statuses=("non_converged",))
     r = s_nc[s_nc.system == "ALL"].iloc[0]
     assert (r.cs_islanding, r.cs_no_solution_severe) == (48, 24)
@@ -438,16 +444,53 @@ def test_build_and_print_report(ns, capsys):
     bases = {("src", 0): SimpleNamespace(snapshots=pd.RangeIndex(4))}
     r = ns["build_contingency_report"](assess, no_sol, rows, bases, {}, [], {}, {})
     assert set(r) == {"outage_summary", "case_level", "element_level", "no_solution_flags", "severity_ranking",
-                      "pr_auc", "near_limit_mae", "regression_n1_vs_base", "cost"}
+                      "pr_auc", "near_limit_mae", "regression_n1_vs_base", "cost",
+                      "pv_slack_voltage_info"}   # [STSI 201026]:task 097
     assert r["regression_n1_vs_base"].empty
     assert len(r["cost"]) == 3   # pipeline rows only (no runs, no reference timing)
     np.testing.assert_allclose(r["cost"].ms_per_contingency, r["cost"].ms_per_snapshot * 4)
     ns["print_contingency_report"](r)
     out = capsys.readouterr().out
-    i1, i2, io = out.index("HEADLINE 1"), out.index("HEADLINE 2"), out.index("OUTAGE SUMMARY")
-    assert i1 < i2 < io < out.index("NO-SOLUTION FLAG TABLE")
+    # [STSI 201026]:task 097 - induced headline, context, PV/slack table, caveats last
+    marks = ["HEADLINE 1", "HEADLINE 2", "CONTEXT", "OUTAGE SUMMARY", "NO-SOLUTION FLAG TABLE", "PV/SLACK",
+             "--- CAVEATS ---"]
+    idx = [out.index(m) for m in marks]
+    assert idx == sorted(idx)
+    i1, i2, ic = idx[0], idx[1], idx[-1]
     assert ns["NO_SOLUTION_CAVEAT"] in out[i1:i2] and "any+no_solution" in out[i1:i2]
+    assert "contingency_induced" in out[i1:i2]
+    for cav in ns["REPORT_CAVEATS"]:
+        assert cav in out[ic:]
     assert out.rstrip().endswith(ns["D3_CAVEAT"])
+
+
+def test_pq_only_filters_voltage_metrics(ns):  # [STSI 201026]:task 097 F1
+    b = lambda: _bus_frame([(0, "A", 0, "g", 1.20), (0, "A", 0, "q", 1.0)], bus_type=["PV", "PQ"])
+    assess = {"truth": (b(), _empty_lines()), "p": (b(), _empty_lines()), "_timing_s": {}}
+    before = {k: (v[0].copy(), v[1].copy()) for k, v in assess.items() if k != "_timing_s"}
+    rows = pd.DataFrame(dict(case_id=[0], system=["A"], status=["solved"], source_index="src", source_position=0,
+                             base_nonconverged_snapshots=[[]], base_sanity_failed_snapshots=[[]]))
+    r = ns["build_contingency_report"](assess, None, rows, {("src", 0): SimpleNamespace(snapshots=pd.RangeIndex(1))},
+                                       {}, [], {}, {})
+    cv = r["case_level"][r["case_level"].scope == "voltage"]
+    assert len(cv) and ((cv.tp + cv.fn) == 0).all()
+    eb = r["element_level"][r["element_level"].element == "bus"]
+    assert len(eb) and ((eb.tp + eb.fn) == 0).all()
+    pv = r["pv_slack_voltage_info"]
+    hit = pv[(pv.system == "ALL") & (pv.violation_type == "over_v") & (pv.level == "violation")]
+    assert len(hit) == 1 and int(hit.iloc[0].tp) == 1 and int(hit.iloc[0].n) == 1
+    assert (r["outage_summary"].share_any_violation_solved == 0.0).all()
+    for k, (bus, line) in before.items():
+        pd.testing.assert_frame_equal(assess[k][0], bus)
+        pd.testing.assert_frame_equal(assess[k][1], line)
+
+
+def test_pq_only_passthrough(ns):  # [STSI 201026]:task 097 F1
+    assert ns["pq_only"](None) is None
+    e_bus, e_line, timing = pd.DataFrame(), pd.DataFrame(), {"truth": 1.0}
+    out = ns["pq_only"]({"truth": (e_bus, e_line), "_timing_s": timing})
+    assert out["_timing_s"] is timing
+    assert out["truth"][0] is e_bus and out["truth"][1] is e_line
 
 
 # [STSI 151026]:task 093 D-C - regression nets restricted to base-ok snapshots

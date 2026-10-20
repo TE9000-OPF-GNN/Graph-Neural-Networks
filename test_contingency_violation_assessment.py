@@ -15,7 +15,11 @@ import pytest
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 CONTINGENCY = os.path.join(REPO, "GNN_Powerflow_V2.7_Contingency.ipynb")
-TOGGLES_MARKER = "run_contingency_eval = False"
+# [STSI 191026]:task 095 - never exec driver / toggles / user config; toggles forced off (F11)
+DRIVER_BANNER = "# ==== CONTINGENCY: DRIVER (task 090) ===="
+SKIP_BANNERS = (DRIVER_BANNER, "# ==== CONTINGENCY: USER CONFIG (task 095) ====",
+                "contingency notebook execution toggles")
+FORCED_OFF = dict(run_contingency_eval=False, run_ref_timing=False)
 S8_NAME = "sweep_S8_new_curriculum.json"
 BASE_NAME = "mixed_1500_w.json"
 BASE_POS = 138
@@ -36,13 +40,19 @@ def _code_sources(path):
             for c in cells if c["cell_type"] == "code"]
 
 
-@pytest.fixture(scope="module")
-def ns():
-    namespace = {"__name__": "__task089_test__"}
+def _exec_contingency(name, include_driver=False):
+    namespace = {"__name__": name, **FORCED_OFF}
     for i, src in enumerate(_code_sources(CONTINGENCY)):
-        if TOGGLES_MARKER in src:
+        if any(b in src for b in SKIP_BANNERS) and not (include_driver and DRIVER_BANNER in src):
             continue
         exec(compile(_clean(src), f"<contingency:code{i}>", "exec"), namespace)  # noqa: S102
+        namespace.update(FORCED_OFF)
+    return namespace
+
+
+@pytest.fixture(scope="module")
+def ns():
+    namespace = _exec_contingency("__task089_test__")
     main = sys.modules["__main__"]
     had, old = hasattr(main, "PowerFlowGNN"), getattr(main, "PowerFlowGNN", None)
     main.PowerFlowGNN = namespace["PowerFlowGNN"]  # unpickling resolves the class from __main__
