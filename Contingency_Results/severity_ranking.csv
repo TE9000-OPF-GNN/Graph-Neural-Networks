@@ -1,0 +1,11 @@
+predictor,severity,n_cases,spearman_rho,top5_recall,top10_recall,top20_recall
+dc,thermal,156,0.6510359826067732,0.0,0.0,0.0
+dc,voltage,156,0.8772338623667345,0.2,0.6,0.85
+adap-fp0.1_ft0.3_flow-dcL0.1-dcG0.1-acL0.2-acG0.1_kvl0.3_balDC_bs64_lr1.00e-04_h128_L6_gatv2_manual_s42_hmwith_encoder_pn0_cb-res_agelu_do0.1_amedge_delta_vmresidual_phys60_ptdf60-85_dcfL20-65_dcfG40-75_acfL50_acfG80_kvl0_ramp10,thermal,156,0.6590855210127862,0.0,0.5,0.7
+adap-fp0.1_ft0.3_flow-dcL0.1-dcG0.1-acL0.2-acG0.1_kvl0.3_balDC_bs64_lr1.00e-04_h128_L6_gatv2_manual_s42_hmwith_encoder_pn0_cb-res_agelu_do0.1_amedge_delta_vmresidual_phys60_ptdf60-85_dcfL20-65_dcfG40-75_acfL50_acfG80_kvl0_ramp10,voltage,156,0.859355724720779,0.2,0.6,0.85
+adap-fp0.1_ft0.3_flow-dcL0.1-dcG0.1-acL0.2-acG0.1_kvl0.3_balDC_bs64_lr1.00e-04_h128_L6_gatv2_manual_s42_hmwith_encoder_pn0_cb-res_agelu_do0.1_amboth_vmresidual_phys60_ptdf60-85_dcfL20-65_dcfG40-75_acfL50_acfG80_kvl0_ramp10,thermal,156,0.48045392043748314,0.2,0.2,0.25
+adap-fp0.1_ft0.3_flow-dcL0.1-dcG0.1-acL0.2-acG0.1_kvl0.3_balDC_bs64_lr1.00e-04_h128_L6_gatv2_manual_s42_hmwith_encoder_pn0_cb-res_agelu_do0.1_amboth_vmresidual_phys60_ptdf60-85_dcfL20-65_dcfG40-75_acfL50_acfG80_kvl0_ramp10,voltage,156,0.8898976097794005,0.2,0.6,0.85
+adap-fp0.1_ft0.3_flow-dcL0.1-dcG0.1-acL0.2-acG0.1_kvl0.3_balDC_bs64_lr1.00e-04_h64_L3_gatv2_manual_s42_hmwith_encoder_pn0_cb-res_agelu_do0.1_amedge_delta_vmresidual_phys60_ptdf60-85_dcfL20-65_dcfG40-75_acfL50_acfG80_kvl0_ramp10,thermal,156,0.5483019205169759,0.0,0.0,0.0
+adap-fp0.1_ft0.3_flow-dcL0.1-dcG0.1-acL0.2-acG0.1_kvl0.3_balDC_bs64_lr1.00e-04_h64_L3_gatv2_manual_s42_hmwith_encoder_pn0_cb-res_agelu_do0.1_amedge_delta_vmresidual_phys60_ptdf60-85_dcfL20-65_dcfG40-75_acfL50_acfG80_kvl0_ramp10,voltage,156,0.8772338623667345,0.2,0.6,0.85
+adap-fp0.1_ft0.3_flow-dcL0.1-dcG0.1-acL0.2-acG0.1_kvl0.3_balDC_bs64_lr1.00e-04_h128_L6_gatv2_manual_s42_hmwith_encoder_pn0_cb-res_agelu_do0.2_amedge_delta_vmresidual_phys60_ptdf60-85_dcfL20-65_dcfG40-75_acfL50_acfG80_kvl0_ramp10,thermal,156,0.6432204327416983,0.2,0.2,0.25
+adap-fp0.1_ft0.3_flow-dcL0.1-dcG0.1-acL0.2-acG0.1_kvl0.3_balDC_bs64_lr1.00e-04_h128_L6_gatv2_manual_s42_hmwith_encoder_pn0_cb-res_agelu_do0.2_amedge_delta_vmresidual_phys60_ptdf60-85_dcfL20-65_dcfG40-75_acfL50_acfG80_kvl0_ramp10,voltage,156,0.8823628925202893,0.2,0.6,0.85
