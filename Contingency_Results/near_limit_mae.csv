@@ -1,0 +1,11 @@
+predictor,element,quantity,unit,n,mae
+dc,bus,vmag,pu,43730,0.08080352802679085
+dc,line,loading,pct_points,2881,22.480138173229946
+adap-fp0.1_ft0.3_flow-dcL0.1-dcG0.1-acL0.2-acG0.1_kvl0.3_balDC_bs64_lr1.00e-04_h128_L6_gatv2_manual_s42_hmwith_encoder_pn0_cb-res_agelu_do0.1_amedge_delta_vmresidual_phys60_ptdf60-85_dcfL20-65_dcfG40-75_acfL50_acfG80_kvl0_ramp10,bus,vmag,pu,43730,0.037127904782682755
+adap-fp0.1_ft0.3_flow-dcL0.1-dcG0.1-acL0.2-acG0.1_kvl0.3_balDC_bs64_lr1.00e-04_h128_L6_gatv2_manual_s42_hmwith_encoder_pn0_cb-res_agelu_do0.1_amedge_delta_vmresidual_phys60_ptdf60-85_dcfL20-65_dcfG40-75_acfL50_acfG80_kvl0_ramp10,line,loading,pct_points,2881,41.630178993788654
+adap-fp0.1_ft0.3_flow-dcL0.1-dcG0.1-acL0.2-acG0.1_kvl0.3_balDC_bs64_lr1.00e-04_h128_L6_gatv2_manual_s42_hmwith_encoder_pn0_cb-res_agelu_do0.1_amboth_vmresidual_phys60_ptdf60-85_dcfL20-65_dcfG40-75_acfL50_acfG80_kvl0_ramp10,bus,vmag,pu,43730,0.06293189825627446
+adap-fp0.1_ft0.3_flow-dcL0.1-dcG0.1-acL0.2-acG0.1_kvl0.3_balDC_bs64_lr1.00e-04_h128_L6_gatv2_manual_s42_hmwith_encoder_pn0_cb-res_agelu_do0.1_amboth_vmresidual_phys60_ptdf60-85_dcfL20-65_dcfG40-75_acfL50_acfG80_kvl0_ramp10,line,loading,pct_points,2881,31.314311040464865
+adap-fp0.1_ft0.3_flow-dcL0.1-dcG0.1-acL0.2-acG0.1_kvl0.3_balDC_bs64_lr1.00e-04_h64_L3_gatv2_manual_s42_hmwith_encoder_pn0_cb-res_agelu_do0.1_amedge_delta_vmresidual_phys60_ptdf60-85_dcfL20-65_dcfG40-75_acfL50_acfG80_kvl0_ramp10,bus,vmag,pu,43730,0.07529671425741956
+adap-fp0.1_ft0.3_flow-dcL0.1-dcG0.1-acL0.2-acG0.1_kvl0.3_balDC_bs64_lr1.00e-04_h64_L3_gatv2_manual_s42_hmwith_encoder_pn0_cb-res_agelu_do0.1_amedge_delta_vmresidual_phys60_ptdf60-85_dcfL20-65_dcfG40-75_acfL50_acfG80_kvl0_ramp10,line,loading,pct_points,2881,59.45287972514865
+adap-fp0.1_ft0.3_flow-dcL0.1-dcG0.1-acL0.2-acG0.1_kvl0.3_balDC_bs64_lr1.00e-04_h128_L6_gatv2_manual_s42_hmwith_encoder_pn0_cb-res_agelu_do0.2_amedge_delta_vmresidual_phys60_ptdf60-85_dcfL20-65_dcfG40-75_acfL50_acfG80_kvl0_ramp10,bus,vmag,pu,43730,0.04872825985327898
+adap-fp0.1_ft0.3_flow-dcL0.1-dcG0.1-acL0.2-acG0.1_kvl0.3_balDC_bs64_lr1.00e-04_h128_L6_gatv2_manual_s42_hmwith_encoder_pn0_cb-res_agelu_do0.2_amedge_delta_vmresidual_phys60_ptdf60-85_dcfL20-65_dcfG40-75_acfL50_acfG80_kvl0_ramp10,line,loading,pct_points,2881,41.06956011922541
