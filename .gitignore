@@ -26,3 +26,6 @@ GNN_Powerflow_V2.7_Training_possible_restorepoint.ipynb
 .docs/
 __pycache__/
 Archive/
+test_uq_c2_hooks.py
+test_uq_notebook_parity.py
+test_uq_shared_infra.py
