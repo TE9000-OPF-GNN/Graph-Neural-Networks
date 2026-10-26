@@ -34,3 +34,4 @@ test_uq_b1.py
 test_uq_bll.py
 test_uq_common.py
 test_uq_copy_parity.py
+test_uq_harness_cal2.py
