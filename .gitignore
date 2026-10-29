@@ -36,3 +36,16 @@ test_uq_common.py
 test_uq_copy_parity.py
 test_uq_harness_cal2.py
 test_uq_analysis_sections.py
+datagen_uc_run.py
+test_contingency_branch_key_copies.py
+test_datagen_acceptance.py
+test_datagen_continuation.py
+test_datagen_coverage.py
+test_datagen_line_limits_branch_key.py
+test_datagen_n1_generation.py
+test_datagen_regen_cells.py
+test_datagen_sampler.py
+test_datagen_steering.py
+test_datagen_trafo_invariants.py
+test_datagen_uc_runbook.py
+test_uq_ckpt_variants.py
