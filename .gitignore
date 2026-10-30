@@ -49,3 +49,5 @@ test_datagen_steering.py
 test_datagen_trafo_invariants.py
 test_datagen_uc_runbook.py
 test_uq_ckpt_variants.py
+datagen_nb_guard.py
+test_datagen_notebook_workflow.py
